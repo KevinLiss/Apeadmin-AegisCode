@@ -122,10 +122,12 @@ async def user_info(
         from src.crud import crud_menu
         all_menus = await crud_menu.get_tree(db)
         from src.core.deps import _build_menu_tree
-        # Super admins bypass permission checks, but disabled/hidden menus
-        # must still stay out of the sidebar after a plugin is turned off.
+        # Super admins bypass permission checks; disabled menus must stay out
+        # after a plugin is turned off. `visible=0` (hidden pages like detail
+        # views) are still returned — frontend sidebar filters them, and
+        # dynamic routing needs them to register the route.
         menu_tree = _build_menu_tree(
-            [menu for menu in all_menus if menu.status == 1 and menu.visible == 1]
+            [menu for menu in all_menus if menu.status == 1]
         )
     else:
         menu_tree = get_user_menu_tree(user)

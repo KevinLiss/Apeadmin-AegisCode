@@ -117,11 +117,12 @@ function priorityText(p: number) {
 async function fetchList() {
   loading.value = true
   try {
+    // request.ts 拦截器已拆开 {code,msg,data} 信封，res 即内层 data
     const res: any = await request.get('/dev-example/notes', {
       params: { page: page.value, page_size: pageSize.value }
     })
-    tableData.value = res.data.items || []
-    total.value = res.data.total || 0
+    tableData.value = res.items || []
+    total.value = res.total || 0
   } catch {
     // handled by interceptor
   } finally {

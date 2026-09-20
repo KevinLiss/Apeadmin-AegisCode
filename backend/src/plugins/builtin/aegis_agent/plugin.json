@@ -1,0 +1,8 @@
+{
+  "name": "aegis_agent",
+  "display_name": "AegisCode Agent",
+  "version": "0.1.0",
+  "description": "AegisCode 核心 Agent 运行时——状态机驱动对话循环、精确 Token 计量、分层上下文管理、多角色 DAG 工作流",
+  "author": "AegisCode",
+  "dependencies": []
+}

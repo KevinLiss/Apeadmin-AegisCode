@@ -47,7 +47,7 @@
             </div>
           </li>
           <li
-            v-for="child in menu.children.filter((c: any) => c.type !== 'F')"
+            v-for="child in menu.children.filter((c: any) => c.type !== 'F' && c.visible !== 0)"
             v-show="isTopMenuOpen(menu.id)"
             :key="child.id"
             class="sidebar-list"
@@ -55,7 +55,7 @@
             @mouseleave="collapsed && !isMobile && (hoverSub = null)"
           >
             <!-- 有子菜单的 C 类型菜单（如未来扩展三级菜单） -->
-            <template v-if="child.children?.some((c: any) => c.type !== 'F')">
+            <template v-if="child.children?.some((c: any) => c.type !== 'F' && c.visible !== 0)">
               <a class="sidebar-link sidebar-title" href="javascript:void(0)" @click="toggleSub(child.id)">
                 <el-icon class="menu-icon"><component :is="child.icon || 'Menu'" /></el-icon>
                 <span>{{ child.name }}</span>
@@ -63,7 +63,7 @@
               </a>
               <!-- Expanded: inline submenu -->
               <ul class="sidebar-submenu" v-show="openedSub === child.id">
-                <li v-for="grandchild in child.children.filter((c: any) => c.type !== 'F')" :key="grandchild.id">
+                <li v-for="grandchild in child.children.filter((c: any) => c.type !== 'F' && c.visible !== 0)" :key="grandchild.id">
                   <router-link :to="resolvePath(menu.path, child.path, grandchild.path)" :class="{ active: route.path === resolvePath(menu.path, child.path, grandchild.path) }">
                     {{ grandchild.name }}
                   </router-link>
@@ -73,7 +73,7 @@
               <div class="flyout-submenu" v-if="collapsed && !isMobile && hoverSub === child.id">
                 <h6>{{ child.name }}</h6>
                 <ul>
-                  <li v-for="grandchild in child.children.filter((c: any) => c.type !== 'F')" :key="grandchild.id">
+                  <li v-for="grandchild in child.children.filter((c: any) => c.type !== 'F' && c.visible !== 0)" :key="grandchild.id">
                     <router-link :to="resolvePath(menu.path, child.path, grandchild.path)" :class="{ active: route.path === resolvePath(menu.path, child.path, grandchild.path) }">
                       {{ grandchild.name }}
                     </router-link>
@@ -135,9 +135,10 @@ const openedTopMenus = ref<Record<string | number, boolean>>({})
 // 子菜单数量超过该值则默认收起（避免大量子菜单平铺过长）
 const DEFAULT_COLLAPSE_THRESHOLD = 12
 
-// 过滤掉 F 类型（按钮），只保留 M/C 用于侧边栏渲染
+// 过滤掉 F 类型（按钮）和 visible=0 的隐藏页（如详情页），只保留可展示的 M/C 用于侧边栏渲染。
+// 注: 隐藏菜单的路由注册在 generateDynamicRoutes（router/index.ts）中完成，不受此过滤影响。
 const menuTree = computed(() => {
-  return (userStore.menus || []).filter((m: any) => m.type !== 'F')
+  return (userStore.menus || []).filter((m: any) => m.type !== 'F' && m.visible !== 0)
 })
 
 // 判断当前路由是否命中某顶级目录下的菜单
