@@ -1,0 +1,91 @@
+# ========================================
+# Python / FastAPI Backend
+# ========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+runtimes/
+
+# Database
+*.db
+*.sqlite3
+*.db.bak_*
+
+# Runtime uploads (plugin packages / media)
+backend/src/uploads/
+# 后端挂载的静态构建产物（由前端构建后同步拷贝）
+backend/frontend_dist/
+
+# Alembic
+backend/alembic/versions/*.py
+!backend/alembic/versions/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ========================================
+# Node / Vue3 Frontend
+# ========================================
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+
+# ========================================
+# Environment & Secrets
+# ========================================
+.env
+.env.*
+!.env.example
+
+# ========================================
+# OS Files
+# ========================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ========================================
+# Business plugins (developed & stored in a separate repo)
+# ========================================
+backend/src/plugins/builtin/apehub_web/
+frontend/src/views/apehub_web/
+frontend/src/api/apehub_web.ts
+backend/tests/test_apehub_web_marketplace.py
+APEHUB_WEB_*.md
+
+# 独立建仓的业务插件：不在底座仓库维护，各自独立仓库
+backend/src/plugins/builtin/aimeeting/
+backend/src/plugins/builtin/ai_vision/
+frontend/src/api/aimeeting.ts
+frontend/src/api/ai_vision/
+frontend/src/views/aimeeting/
+frontend/src/views/ai_vision/
+backend/tests/test_ai_vision_engine.py
+backend/tests/test_ai_vision_worker.py
+
+# ========================================
+# Temporary / Agent Files
+# ========================================
+.temp/
+*.log
+*.tmp
+
+# Deploy package staging / artifacts
+deploy/.stage/
+deploy/dist/
