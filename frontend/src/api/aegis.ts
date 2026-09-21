@@ -166,6 +166,13 @@ export const skillApi = {
   createTool: (data: any) => request.post('/aegis-skill/tools', data),
   updateTool: (id: number, data: any) => request.put(`/aegis-skill/tools/${id}`, data),
   deleteTool: (id: number) => request.delete(`/aegis-skill/tools/${id}`),
+  // 技能市场
+  listMarket: (params?: any) => request.get('/aegis-skill/market', { params }),
+  installSkill: (skillId: number) => request.post(`/aegis-skill/market/${skillId}/install`),
+  publishSkill: (skillId: number) => request.post(`/aegis-skill/skills/${skillId}/publish`),
+  unpublishSkill: (skillId: number) => request.post(`/aegis-skill/skills/${skillId}/unpublish`),
+  // 我的技能
+  listMySkills: (params?: any) => request.get('/aegis-skill/my-skills', { params }),
 }
 
 // ── MCP 服务器 ──

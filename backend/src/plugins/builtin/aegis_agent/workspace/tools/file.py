@@ -3,7 +3,10 @@
 所有操作经过沙箱路径校验，确保在项目根目录内。
 """
 
+import base64
 import hashlib
+import json
+import mimetypes
 import os
 from pathlib import Path
 from typing import Any
@@ -11,16 +14,57 @@ from typing import Any
 from loguru import logger
 from src.plugins.builtin.aegis_agent.workspace.sandbox import Sandbox, SandboxConfig
 
+# ── 文件类型分类 ──
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"}
+TEXT_EXTS = {
+    ".txt", ".md", ".markdown", ".rst", ".log", ".ini", ".cfg", ".conf", ".toml",
+    ".yaml", ".yml", ".json", ".xml", ".html", ".htm", ".css", ".scss", ".less",
+    ".js", ".jsx", ".ts", ".tsx", ".vue", ".py", ".rb", ".go", ".rs", ".java",
+    ".kt", ".swift", ".c", ".cpp", ".cc", ".h", ".hpp", ".cs", ".php", ".pl",
+    ".sh", ".bash", ".zsh", ".fish", ".bat", ".cmd", ".ps1", ".sql", ".graphql",
+    ".dockerfile", ".env", ".gitignore", ".editorconfig", ".csv", ".tsv",
+    ".lua", ".r", ".scala", ".groovy", ".gradle", ".makefile", ".cmake",
+}
+CODE_EXTS = {
+    ".js", ".jsx", ".ts", ".tsx", ".vue", ".py", ".rb", ".go", ".rs", ".java",
+    ".kt", ".swift", ".c", ".cpp", ".cc", ".h", ".hpp", ".cs", ".php", ".pl",
+    ".sh", ".bash", ".zsh", ".sql", ".graphql", ".lua", ".r", ".scala",
+    ".groovy", ".html", ".htm", ".css", ".scss", ".less",
+}
+MARKDOWN_EXTS = {".md", ".markdown", ".rst"}
+
+# 预览大小限制
+MAX_TEXT_PREVIEW_SIZE = 2 * 1024 * 1024      # 文本 2MB
+MAX_IMAGE_PREVIEW_SIZE = 10 * 1024 * 1024     # 图片 10MB
+
+
+def _classify_file(path: Path) -> str:
+    """根据扩展名判断文件预览类型：image / text / markdown / binary"""
+    ext = path.suffix.lower()
+    if ext in IMAGE_EXTS:
+        return "image"
+    if ext in MARKDOWN_EXTS:
+        return "markdown"
+    if ext in TEXT_EXTS:
+        return "text"
+    # 无扩展名也尝试按文本处理（如 Dockerfile, Makefile 等）
+    name = path.name.lower()
+    if name in ("dockerfile", "makefile", "readme", "license"):
+        return "text"
+    # 用 mimetypes 辅助
+    mime, _ = mimetypes.guess_type(str(path))
+    if mime and mime.startswith("text/"):
+        return "text"
+    return "binary"
+
 
 async def read_file(project_root: str, file_path: str) -> str:
-    """读取文件内容。
+    """读取文件内容（按类型返回：文本/Markdown/图片 base64/二进制拦截）。
 
     Args:
         project_root: 项目根目录绝对路径
         file_path: 相对项目根的文件路径
     """
-    import json
-
     sandbox = Sandbox(SandboxConfig(root_path=project_root))
     valid, resolved = sandbox.validate_path(file_path)
     if not valid:
@@ -33,16 +77,63 @@ async def read_file(project_root: str, file_path: str) -> str:
         if path.is_dir():
             return json.dumps({"error": f"是目录不是文件: {file_path}"}, ensure_ascii=False)
 
-        content = path.read_text(encoding="utf-8", errors="replace")
         size = path.stat().st_size
+        file_type = _classify_file(path)
+        ext = path.suffix.lower()
+
+        # ── 图片：返回 base64 ──
+        if file_type == "image":
+            if size > MAX_IMAGE_PREVIEW_SIZE:
+                return json.dumps({
+                    "path": file_path,
+                    "file_type": "image",
+                    "size": size,
+                    "preview_type": "image_too_large",
+                    "mime": mimetypes.guess_type(str(path))[0] or "image/*",
+                }, ensure_ascii=False)
+            raw = path.read_bytes()
+            mime = mimetypes.guess_type(str(path))[0] or "image/*"
+            b64 = base64.b64encode(raw).decode("ascii")
+            return json.dumps({
+                "path": file_path,
+                "file_type": "image",
+                "preview_type": "image",
+                "content": f"data:{mime};base64,{b64}",
+                "size": size,
+                "mime": mime,
+            }, ensure_ascii=False)
+
+        # ── 二进制文件：不读取内容 ──
+        if file_type == "binary":
+            return json.dumps({
+                "path": file_path,
+                "file_type": "binary",
+                "preview_type": "binary",
+                "size": size,
+                "ext": ext,
+            }, ensure_ascii=False)
+
+        # ── 文本/Markdown：读取内容 ──
+        if size > MAX_TEXT_PREVIEW_SIZE:
+            return json.dumps({
+                "path": file_path,
+                "file_type": file_type,
+                "preview_type": "text_too_large",
+                "size": size,
+            }, ensure_ascii=False)
+
+        content = path.read_text(encoding="utf-8", errors="replace")
         content_hash = hashlib.md5(content.encode()).hexdigest()
 
         return json.dumps({
             "path": file_path,
+            "file_type": file_type,
+            "preview_type": file_type,
             "content": content,
             "size": size,
             "hash": content_hash,
             "lines": content.count("\n") + 1,
+            "ext": ext,
         }, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)

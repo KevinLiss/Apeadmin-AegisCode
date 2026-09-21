@@ -155,14 +155,45 @@
     <Transition name="preview-slide">
       <div v-if="previewFile" class="file-preview">
         <div class="preview-header">
+          <span class="preview-icon" v-if="previewMeta.file_type">
+            <svg v-if="previewMeta.file_type === 'image'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            <svg v-else-if="previewMeta.file_type === 'binary'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          </span>
           <span class="preview-name">{{ previewFile.path }}</span>
-          <button class="preview-close" @click="previewFile = null">
+          <span class="preview-size" v-if="previewMeta.size">{{ formatSize(previewMeta.size) }}</span>
+          <button class="preview-close" @click="closePreview">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
         <div class="preview-body" v-loading="previewLoading">
-          <pre v-if="previewContent">{{ previewContent }}</pre>
-          <div v-else-if="!previewLoading" class="preview-empty">无法预览此文件类型</div>
+          <!-- 图片预览 -->
+          <div v-if="!previewLoading && previewMeta.preview_type === 'image'" class="preview-image-wrap">
+            <img :src="previewContent" :alt="previewFile.name" class="preview-image" />
+          </div>
+          <!-- 图片过大 -->
+          <div v-else-if="!previewLoading && previewMeta.preview_type === 'image_too_large'" class="preview-empty">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            <p>图片过大（{{ formatSize(previewMeta.size) }}），无法预览</p>
+          </div>
+          <!-- 文本过大 -->
+          <div v-else-if="!previewLoading && previewMeta.preview_type === 'text_too_large'" class="preview-empty">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <p>文件过大（{{ formatSize(previewMeta.size) }}），超出预览限制</p>
+          </div>
+          <!-- 二进制文件 -->
+          <div v-else-if="!previewLoading && previewMeta.preview_type === 'binary'" class="preview-empty">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <p>二进制文件（{{ previewMeta.ext || '未知格式' }}）无法预览</p>
+          </div>
+          <!-- Markdown 渲染 -->
+          <div v-else-if="!previewLoading && previewMeta.file_type === 'markdown' && previewContent" class="preview-markdown" v-html="renderMarkdown(previewContent)"></div>
+          <!-- 代码高亮 -->
+          <pre v-else-if="!previewLoading && previewContent" class="preview-code"><code>{{ previewContent }}</code></pre>
+          <!-- 空文件 -->
+          <div v-else-if="!previewLoading && !previewContent && previewMeta.preview_type !== 'binary'" class="preview-empty">
+            <p>文件内容为空</p>
+          </div>
         </div>
       </div>
     </Transition>
@@ -221,6 +252,7 @@ const uploadTargetFolder = ref('用户上传')
 // 预览
 const previewFile = ref<FileEntry | null>(null)
 const previewContent = ref('')
+const previewMeta = ref<any>({})
 const previewLoading = ref(false)
 
 // 文件夹下的文件
@@ -405,15 +437,67 @@ async function confirmDeleteFile(f: FileEntry) {
 async function onFileClick(f: FileEntry) {
   previewFile.value = f
   previewContent.value = ''
+  previewMeta.value = {}
   previewLoading.value = true
   try {
     const res: any = await workspaceApi.readFile(props.project.id, f.path)
-    previewContent.value = res?.content || ''
+    if (res?.preview_type === 'image') {
+      // 图片 base64 data URL
+      previewContent.value = res.content || ''
+    } else if (res?.preview_type === 'text' || res?.preview_type === 'markdown') {
+      previewContent.value = res.content || ''
+    } else {
+      previewContent.value = ''
+    }
+    previewMeta.value = {
+      file_type: res?.file_type || '',
+      preview_type: res?.preview_type || '',
+      size: res?.size || f.size || 0,
+      ext: res?.ext || '',
+      mime: res?.mime || '',
+    }
   } catch {
     previewContent.value = ''
+    previewMeta.value = {}
   } finally {
     previewLoading.value = false
   }
+}
+
+function closePreview() {
+  previewFile.value = null
+  previewContent.value = ''
+  previewMeta.value = {}
+}
+
+// ── Markdown 简易渲染 ──
+function renderMarkdown(text: string): string {
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+  return escaped
+    // 代码块
+    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="md-code-block"><code>$2</code></pre>')
+    // 标题
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    // 粗体/斜体
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    // 行内代码
+    .replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
+    // 链接
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+    // 无序列表
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    // 有序列表
+    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+    // 换行
+    .replace(/\n/g, '<br>')
 }
 
 function formatSize(bytes: number): string {
@@ -757,9 +841,15 @@ onMounted(() => {
   height: 36px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   padding: 0 12px;
   border-bottom: 1px solid var(--theme-border-color, #e5e7eb);
+}
+.preview-icon {
+  display: flex;
+  align-items: center;
+  color: var(--theme-text-secondary, #6b7280);
+  flex-shrink: 0;
 }
 .preview-name {
   font-size: 13px;
@@ -768,6 +858,13 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.preview-size {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--theme-text-secondary, #9ca3af);
 }
 .preview-close {
   width: 24px;
@@ -790,20 +887,92 @@ onMounted(() => {
   overflow: auto;
   padding: 12px;
 }
-.preview-body pre {
+/* 代码预览 */
+.preview-code {
   font-size: 12px;
   font-family: 'Menlo', 'Monaco', monospace;
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--theme-text-color, #1f2937);
   margin: 0;
-  line-height: 1.5;
+  line-height: 1.6;
+  background: var(--theme-hover-bg, #f6f7f9);
+  border-radius: 8px;
+  padding: 12px;
+}
+/* 图片预览 */
+.preview-image-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+.preview-image {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  object-fit: contain;
+}
+/* Markdown 预览 */
+.preview-markdown {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--theme-text-color, #1f2937);
+  word-break: break-word;
+}
+.preview-markdown :deep(h1),
+.preview-markdown :deep(h2),
+.preview-markdown :deep(h3) {
+  font-weight: 600;
+  margin: 16px 0 8px;
+  color: var(--theme-text-color, #1f2937);
+}
+.preview-markdown :deep(h1) { font-size: 20px; }
+.preview-markdown :deep(h2) { font-size: 17px; }
+.preview-markdown :deep(h3) { font-size: 15px; }
+.preview-markdown :deep(strong) { font-weight: 600; }
+.preview-markdown :deep(.md-inline-code) {
+  background: var(--theme-hover-bg, #f3f4f6);
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'Menlo', 'Monaco', monospace;
+}
+.preview-markdown :deep(.md-code-block) {
+  background: #1e293b;
+  color: #e2e8f0;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: 'Menlo', 'Monaco', monospace;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.preview-markdown :deep(li) {
+  margin-left: 20px;
+  list-style: disc;
+  margin-bottom: 4px;
+}
+.preview-markdown :deep(a) {
+  color: var(--el-color-primary, #4f46e5);
+  text-decoration: none;
+}
+.preview-markdown :deep(a:hover) {
+  text-decoration: underline;
 }
 .preview-empty {
-  text-align: center;
-  padding: 24px;
-  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 200px;
   color: var(--theme-text-secondary, #9ca3af);
+  font-size: 13px;
+}
+.preview-empty svg {
+  opacity: 0.4;
 }
 
 /* 动画 */

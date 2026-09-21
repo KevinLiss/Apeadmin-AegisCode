@@ -1116,12 +1116,40 @@ function renderContent(text: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
   return escaped
-    // 代码块
-    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="code-block"><code>$2</code></pre>')
+    // 代码块（带语言标签）
+    .replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
+      const langLabel = lang ? lang : 'code'
+      return `<div class="code-block-wrapper"><div class="code-block-header"><span class="code-lang">${langLabel}</span></div><pre class="code-block"><code>${code.trim()}</code></pre></div>`
+    })
+    // 标题
+    .replace(/^### (.+)$/gm, '<h3 class="md-h3">$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2 class="md-h2">$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1 class="md-h1">$1</h1>')
+    // 水平线
+    .replace(/^---$/gm, '<hr class="md-hr">')
+    // 引用块
+    .replace(/^&gt; (.+)$/gm, '<blockquote class="md-quote">$1</blockquote>')
     // 行内代码
     .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
     // 粗体
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    // 斜体
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    // 删除线
+    .replace(/~~([^~]+)~~/g, '<span class="md-del">$1</span>')
+    // 链接
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="md-link">$1</a>')
+    // 无序列表
+    .replace(/^- (.+)$/gm, '<div class="md-li">$1</div>')
+    // 有序列表
+    .replace(/^\d+\. (.+)$/gm, '<div class="md-li-ol">$1</div>')
+    // 表格行（简单支持）
+    .replace(/^\|(.+)\|$/gm, (match) => {
+      const cells = match.split('|').filter((c: string) => c.trim())
+      if (cells.every((c: string) => c.trim().match(/^[-:]+$/))) return '' // 分隔行跳过
+      const tds = cells.map((c: string) => `<td class="md-td">${c.trim()}</td>`).join('')
+      return `<tr class="md-tr">${tds}</tr>`
+    })
     // 换行
     .replace(/\n/g, '<br>')
 }
@@ -1342,28 +1370,119 @@ function onShiftEnter() {
   word-break: break-word;
 }
 .msg-text.streaming {
-  animation: text-fade 0.3s;
+  animation: text-fade 0.3s ease-out;
 }
 @keyframes text-fade {
-  from { opacity: 0.6; }
+  from { opacity: 0.7; }
   to { opacity: 1; }
+}
+/* 流式光标 */
+.msg-text.streaming::after {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--el-color-primary, #4f46e5);
+  border-radius: 2px;
+  animation: cursor-blink 1s ease-in-out infinite;
+}
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+/* 代码块增强 */
+.msg-text :deep(.code-block-wrapper) {
+  margin: 10px 0;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #334155;
+  background: #1e293b;
+}
+.msg-text :deep(.code-block-header) {
+  display: flex;
+  align-items: center;
+  padding: 6px 14px;
+  background: #0f172a;
+  border-bottom: 1px solid #334155;
+}
+.msg-text :deep(.code-lang) {
+  font-size: 11px;
+  font-weight: 500;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 .msg-text :deep(.code-block) {
   background: #1e293b;
   color: #e2e8f0;
-  padding: 12px;
-  border-radius: 8px;
+  padding: 12px 14px;
   font-size: 13px;
-  font-family: 'Menlo', 'Monaco', monospace;
+  font-family: 'Menlo', 'Monaco', 'JetBrains Mono', monospace;
   overflow-x: auto;
-  margin: 8px 0;
+  margin: 0;
+  line-height: 1.6;
 }
 .msg-text :deep(.inline-code) {
   background: var(--theme-hover-bg, #f3f4f6);
-  padding: 2px 5px;
+  padding: 2px 6px;
   border-radius: 4px;
   font-size: 13px;
   font-family: 'Menlo', 'Monaco', monospace;
+  color: var(--el-color-primary, #4f46e5);
+}
+/* Markdown 元素样式 */
+.msg-text :deep(.md-h1) { font-size: 20px; font-weight: 700; margin: 14px 0 8px; }
+.msg-text :deep(.md-h2) { font-size: 17px; font-weight: 600; margin: 12px 0 6px; }
+.msg-text :deep(.md-h3) { font-size: 15px; font-weight: 600; margin: 10px 0 4px; }
+.msg-text :deep(.md-hr) { border: none; border-top: 1px solid var(--theme-border-color, #e5e7eb); margin: 12px 0; }
+.msg-text :deep(.md-quote) {
+  border-left: 3px solid var(--el-color-primary, #4f46e5);
+  padding: 4px 12px;
+  margin: 8px 0;
+  color: var(--theme-text-secondary, #6b7280);
+  font-size: 13px;
+  background: var(--theme-hover-bg, #f6f7f9);
+  border-radius: 0 6px 6px 0;
+}
+.msg-text :deep(.md-link) {
+  color: var(--el-color-primary, #4f46e5);
+  text-decoration: none;
+  border-bottom: 1px dashed transparent;
+  transition: border-color 0.15s;
+}
+.msg-text :deep(.md-link:hover) {
+  border-bottom-color: var(--el-color-primary, #4f46e5);
+}
+.msg-text :deep(.md-del) { text-decoration: line-through; opacity: 0.6; }
+.msg-text :deep(.md-li) {
+  position: relative;
+  padding-left: 20px;
+  margin: 4px 0;
+}
+.msg-text :deep(.md-li::before) {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 10px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--el-color-primary, #4f46e5);
+}
+.msg-text :deep(.md-li-ol) {
+  position: relative;
+  padding-left: 24px;
+  margin: 4px 0;
+}
+.msg-text :deep(.md-td) {
+  padding: 6px 12px;
+  border: 1px solid var(--theme-border-color, #e5e7eb);
+  font-size: 13px;
+}
+.msg-text :deep(.md-tr) {
+  display: table-row;
 }
 
 /* ── 工具调用卡片 ── */
@@ -1694,20 +1813,20 @@ function onShiftEnter() {
 /* ── 流式指示器 ── */
 .streaming-indicator {
   display: flex;
-  gap: 4px;
-  padding: 10px 2px;
+  gap: 5px;
+  padding: 12px 2px;
 }
 .streaming-indicator .dot {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--el-color-primary, #4f46e5);
-  animation: bounce 1.4s infinite ease-in-out;
+  animation: dot-pulse 1.4s infinite ease-in-out;
 }
 .streaming-indicator .dot:nth-child(2) { animation-delay: 0.2s; }
 .streaming-indicator .dot:nth-child(3) { animation-delay: 0.4s; }
-@keyframes bounce {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+@keyframes dot-pulse {
+  0%, 80%, 100% { transform: scale(0.5); opacity: 0.3; }
   40% { transform: scale(1); opacity: 1; }
 }
 
@@ -1767,6 +1886,8 @@ function onShiftEnter() {
 }
 .thinking-body.streaming-preview {
   padding-top: 0;
+  border-top: 1px dashed var(--theme-border-color, #e5e7eb);
+  margin-top: 2px;
 }
 
 /* ── 悬浮输入区 ── */
@@ -2226,5 +2347,17 @@ function onShiftEnter() {
 :global(html.dark) .ai-bubble {
   background: #1e1f2e;
   border-color: #2a2b3d;
+}
+:global(html.dark) .msg-text :deep(.inline-code) {
+  background: #2a2b3d;
+  color: #a5b4fc;
+}
+:global(html.dark) .msg-text :deep(.md-quote) {
+  background: #1e1f2e;
+  border-left-color: #6366f1;
+  color: #9ca3af;
+}
+:global(html.dark) .msg-text :deep(.code-block-wrapper) {
+  border-color: #334155;
 }
 </style>

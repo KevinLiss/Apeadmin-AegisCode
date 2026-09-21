@@ -32,6 +32,12 @@
           </svg>
           <span>Git</span>
         </button>
+        <button class="header-pill" @click="togglePanel('skills')" :class="{ active: activePanel === 'skills' }">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+          <span>技能</span>
+        </button>
       </div>
     </header>
 
@@ -88,6 +94,10 @@
             :project="currentProject"
             @close="activePanel = ''"
           />
+          <SkillsPanel
+            v-if="activePanel === 'skills'"
+            @close="activePanel = ''"
+          />
         </div>
       </Transition>
     </div>
@@ -102,6 +112,7 @@ import ChatArea from './components/ChatArea.vue'
 import FilesPanel from './components/FilesPanel.vue'
 import GitPanel from './components/GitPanel.vue'
 import ProjectPanel from './components/ProjectPanel.vue'
+import SkillsPanel from './components/SkillsPanel.vue'
 
 const appVersion = pkg.version
 
@@ -126,9 +137,9 @@ const newSessionNonce = ref(0)
 const projectSidebarRef = ref<InstanceType<typeof ProjectSidebar> | null>(null)
 
 // ── 面板切换 ──
-const activePanel = ref<'files' | 'git' | 'project' | ''>('')
+const activePanel = ref<'files' | 'git' | 'project' | 'skills' | ''>('')
 
-function togglePanel(panel: 'files' | 'git' | 'project') {
+function togglePanel(panel: 'files' | 'git' | 'project' | 'skills') {
   activePanel.value = activePanel.value === panel ? '' : panel
 }
 
