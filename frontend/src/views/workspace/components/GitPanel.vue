@@ -64,12 +64,9 @@ async function loadSnapshots() {
 async function createSnapshot() {
   creating.value = true
   try {
-    const res: any = await workspaceApi.reviewSnapshot(
-      props.project.id,
-      0, // snapshotId 不需要，创建新快照
-      { review_status: 'pending' },
-    )
-    // API 不支持直接创建快照的简单调用，改用 execute
+    await workspaceApi.createSnapshot(props.project.id, {
+      commit_message: `manual snapshot ${new Date().toLocaleString('zh-CN')}`,
+    })
     ElMessage.success('快照已创建')
     await loadSnapshots()
   } catch (e: any) {
@@ -82,7 +79,7 @@ async function createSnapshot() {
 async function reviewSnapshot(snap: any, status: string) {
   try {
     await workspaceApi.reviewSnapshot(props.project.id, snap.id, {
-      review_status: status,
+      status,
     })
     ElMessage.success(status === 'approved' ? '已通过' : '已拒绝')
     await loadSnapshots()

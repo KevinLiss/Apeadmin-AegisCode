@@ -22,9 +22,11 @@ export const workspaceApi = {
     request.post(`/aegis-workspace/projects/${projectId}/files/write`, { path, content }),
   executeCommand: (projectId: number, command: string, cwd = '.', timeout = 60) =>
     request.post(`/aegis-workspace/projects/${projectId}/execute`, { command, cwd, timeout }),
+  createSnapshot: (projectId: number, data?: { commit_message?: string; run_id?: number; step_index?: number }) =>
+    request.post(`/aegis-workspace/projects/${projectId}/snapshot`, data),
   listSnapshots: (projectId: number) =>
     request.get(`/aegis-workspace/projects/${projectId}/snapshots`),
-  reviewSnapshot: (projectId: number, snapshotId: number, data: { review_status: string; review_comment?: string }) =>
+  reviewSnapshot: (projectId: number, snapshotId: number, data: { status: string; comment?: string }) =>
     request.post(`/aegis-workspace/projects/${projectId}/snapshots/${snapshotId}/review`, data),
 }
 

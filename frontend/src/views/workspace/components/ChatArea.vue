@@ -16,17 +16,27 @@
     <!-- 消息流 -->
     <div ref="messagesContainer" class="messages-container">
       <div v-if="messages.length === 0 && !streaming" class="welcome-hint">
+        <div class="welcome-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/>
+            <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+            <line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>
+          </svg>
+        </div>
         <div class="welcome-title">开始与 AI Agent 对话</div>
         <div class="welcome-desc">输入你的编码需求，Agent 会自主分析、调用工具、修改文件。</div>
         <div class="welcome-examples">
           <div class="example-item" @click="sendMessage('帮我查看当前项目的文件结构')">
-            查看项目文件结构
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            <span>查看项目文件结构</span>
           </div>
           <div class="example-item" @click="sendMessage('分析这个项目的架构和技术栈')">
-            分析项目架构
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7"/><rect x="12" y="6" width="3" height="11"/><rect x="17" y="13" width="3" height="4"/></svg>
+            <span>分析项目架构</span>
           </div>
           <div class="example-item" @click="sendMessage('帮我创建一个 README.md 文件')">
-            创建 README
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span>创建 README</span>
           </div>
         </div>
       </div>
@@ -42,37 +52,39 @@
           <div class="msg-bubble user">{{ msg.content }}</div>
         </template>
 
-        <!-- Assistant 消息：无气泡分层展示 -->
+        <!-- Assistant 消息：白色圆角气泡 -->
         <template v-else-if="msg.role === 'assistant'">
           <div class="msg-content">
-            <!-- 深度思考折叠面板 -->
-            <div v-if="msg.reasoning_content" class="thinking-card" :class="{ open: msg._thinkingOpen }">
-              <div class="thinking-header" @click="msg._thinkingOpen = !msg._thinkingOpen">
-                <svg class="thinking-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 16v-4"/><circle cx="12" cy="8" r="0.5"/>
-                </svg>
-                <span class="thinking-label">深度思考</span>
-                <span class="thinking-status" v-if="!msg._thinkingOpen">✓ 已完成</span>
-                <svg class="thinking-arrow" :class="{ open: msg._thinkingOpen }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="6 9 12 15 18 9"/>
-                </svg>
-              </div>
-              <div v-if="msg._thinkingOpen" class="thinking-body">{{ msg.reasoning_content }}</div>
-            </div>
-            <div class="msg-text" v-if="msg.content" v-html="renderContent(msg.content)"></div>
-            <div v-if="msg.tool_calls && msg.tool_calls.length" class="tool-calls-list">
-              <div v-for="(tc, tci) in msg.tool_calls" :key="tci" class="tool-call-card">
-                <div class="tool-call-header" @click="tc._expanded = !tc._expanded">
-                  <span class="tool-icon">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-                  </span>
-                  <span class="tool-name">{{ tc.function?.name || 'unknown' }}</span>
-                  <svg class="tool-chevron" :class="{ open: tc._expanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="9 18 15 12 9 6"/>
+            <div class="ai-bubble">
+              <!-- 深度思考折叠面板 -->
+              <div v-if="msg.reasoning_content" class="thinking-card" :class="{ open: msg._thinkingOpen }">
+                <div class="thinking-header" @click="msg._thinkingOpen = !msg._thinkingOpen">
+                  <svg class="thinking-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 16v-4"/><circle cx="12" cy="8" r="0.5"/>
+                  </svg>
+                  <span class="thinking-label">深度思考</span>
+                  <span class="thinking-status" v-if="!msg._thinkingOpen">已完成</span>
+                  <svg class="thinking-arrow" :class="{ open: msg._thinkingOpen }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"/>
                   </svg>
                 </div>
-                <div v-if="tc._expanded" class="tool-call-body">
-                  <pre class="tool-args">{{ formatJson(tc.function?.arguments) }}</pre>
+                <div v-if="msg._thinkingOpen" class="thinking-body">{{ msg.reasoning_content }}</div>
+              </div>
+              <div class="msg-text" v-if="msg.content" v-html="renderContent(msg.content)"></div>
+              <div v-if="msg.tool_calls && msg.tool_calls.length" class="tool-calls-list">
+                <div v-for="(tc, tci) in msg.tool_calls" :key="tci" class="tool-call-card">
+                  <div class="tool-call-header" @click="tc._expanded = !tc._expanded">
+                    <span class="tool-icon">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                    </span>
+                    <span class="tool-name">{{ tc.function?.name || 'unknown' }}</span>
+                    <svg class="tool-chevron" :class="{ open: tc._expanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="9 18 15 12 9 6"/>
+                    </svg>
+                  </div>
+                  <div v-if="tc._expanded" class="tool-call-body">
+                    <pre class="tool-args">{{ formatJson(tc.function?.arguments) }}</pre>
+                  </div>
                 </div>
               </div>
             </div>
@@ -82,16 +94,18 @@
         <!-- 工具执行结果 -->
         <template v-else-if="msg.role === 'tool'">
           <div class="msg-content">
-            <div class="tool-result-card" :class="{ success: msg.tool_success, fail: !msg.tool_success }">
-              <div class="tool-result-header" @click="msg._expanded = !msg._expanded">
-                <span class="result-status">{{ msg.tool_success ? '✓' : '✗' }}</span>
-                <span class="result-name">{{ msg.tool_name }}</span>
-                <svg class="tool-chevron" :class="{ open: msg._expanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="9 18 15 12 9 6"/>
-                </svg>
-              </div>
-              <div v-if="msg._expanded" class="tool-result-body">
-                <pre class="tool-output">{{ formatToolResult(msg.tool_result) }}</pre>
+            <div class="ai-bubble">
+              <div class="tool-result-card" :class="{ success: msg.tool_success, fail: !msg.tool_success }">
+                <div class="tool-result-header" @click="msg._expanded = !msg._expanded">
+                  <span class="result-status">{{ msg.tool_success ? '✓' : '✗' }}</span>
+                  <span class="result-name">{{ msg.tool_name }}</span>
+                  <svg class="tool-chevron" :class="{ open: msg._expanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 18 15 12 9 6"/>
+                  </svg>
+                </div>
+                <div v-if="msg._expanded" class="tool-result-body">
+                  <pre class="tool-output">{{ formatToolResult(msg.tool_result) }}</pre>
+                </div>
               </div>
             </div>
           </div>
@@ -101,21 +115,28 @@
       <!-- 流式输出中 -->
       <div v-if="streaming" class="message assistant">
         <div class="msg-content">
-          <!-- 流式深度思考面板 -->
-          <div v-if="streamReasoning" class="thinking-card streaming">
-            <div class="thinking-header">
-              <svg class="thinking-icon spinning" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-              </svg>
-              <span class="thinking-label">深度思考 进行中...</span>
+          <div class="ai-bubble">
+            <!-- 流式深度思考面板 -->
+            <div v-if="streamReasoning" class="thinking-card streaming">
+              <div class="thinking-header">
+                <svg class="thinking-icon spinning" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                </svg>
+                <span class="thinking-label">深度思考 进行中...</span>
+              </div>
+              <div class="thinking-body streaming-preview">{{ streamReasoning.slice(-600) }}</div>
             </div>
-            <div class="thinking-body streaming-preview">{{ streamReasoning.slice(-600) }}</div>
-          </div>
-          <div class="msg-text streaming" v-if="streamContent" v-html="renderContent(streamContent)"></div>
-          <div class="streaming-indicator" v-if="!streamContent && !streamReasoning">
-            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <div class="msg-text streaming" v-if="streamContent" v-html="renderContent(streamContent)"></div>
+            <div class="streaming-indicator" v-if="!streamContent && !streamReasoning">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            </div>
           </div>
         </div>
+      </div>
+
+      <!-- 底部免责声明 -->
+      <div class="disclaimer" v-if="messages.length > 0 || streaming">
+        内容由 AI 自动生成，请仔细甄别后使用
       </div>
     </div>
 
@@ -151,7 +172,7 @@
       </Transition>
 
       <div class="input-box-wrapper">
-        <!-- 附件按钮（预留） -->
+        <!-- 左下角：附件按钮（预留） -->
         <button class="input-icon-btn" title="上传附件（即将上线）" disabled>
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
@@ -194,7 +215,7 @@
           @input="autoResize"
         ></textarea>
 
-        <!-- 发送按钮 -->
+        <!-- 右下角：发送按钮（圆形蓝色） -->
         <button
           class="send-btn"
           :class="{ stop: streaming }"
@@ -232,6 +253,7 @@
       </Transition>
 
       <div class="input-hint" v-if="!runId">首次对话将自动创建会话，标题自动生成</div>
+      <div class="input-hint" v-else>Enter 发送 · Shift + Enter 换行</div>
     </div>
   </main>
 </template>
@@ -790,6 +812,10 @@ function onShiftEnter() {
   margin: 60px auto 0;
   text-align: center;
 }
+.welcome-icon {
+  color: var(--el-color-primary, #4f46e5);
+  margin-bottom: 16px;
+}
 .welcome-title {
   font-size: 20px;
   font-weight: 600;
@@ -807,8 +833,11 @@ function onShiftEnter() {
   gap: 8px;
 }
 .example-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 12px 16px;
-  border-radius: 8px;
+  border-radius: 10px;
   border: 1px solid var(--theme-border-color, #e5e7eb);
   background: var(--theme-card-bg, #fff);
   font-size: 13px;
@@ -817,10 +846,17 @@ function onShiftEnter() {
   transition: all 0.15s;
   text-align: left;
 }
+.example-item svg {
+  color: var(--theme-text-secondary, #9ca3af);
+  flex-shrink: 0;
+}
 .example-item:hover {
   border-color: var(--el-color-primary, #4f46e5);
   color: var(--el-color-primary, #4f46e5);
   background: var(--el-color-primary-light-9, #eef2ff);
+}
+.example-item:hover svg {
+  color: var(--el-color-primary, #4f46e5);
 }
 
 /* ── 消息 ── */
@@ -851,7 +887,16 @@ function onShiftEnter() {
   word-break: break-word;
   white-space: pre-wrap;
 }
-/* AI 正文：无气泡平铺 */
+/* AI 正文：白色圆角气泡 */
+.ai-bubble {
+  background: var(--theme-card-bg, #fff);
+  border: 1px solid var(--theme-border-color, #eceef2);
+  border-radius: 14px;
+  border-top-left-radius: 4px;
+  padding: 12px 16px;
+  max-width: 100%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
 .msg-text {
   font-size: 14px;
   line-height: 1.7;
@@ -1200,12 +1245,12 @@ function onShiftEnter() {
   color: var(--theme-text-secondary, #9ca3af);
 }
 
-/* 发送按钮 */
+/* 发送按钮（圆形蓝色） */
 .send-btn {
   flex-shrink: 0;
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
   border: none;
   background: var(--el-color-primary, #4f46e5);
   color: #fff;
@@ -1225,11 +1270,22 @@ function onShiftEnter() {
 .send-btn.stop {
   background: #ef4444;
 }
+/* ── 输入区提示 ── */
 .input-hint {
   text-align: center;
   font-size: 11px;
   color: var(--theme-text-secondary, #9ca3af);
   margin-top: 8px;
+}
+
+/* ── 底部免责声明 ── */
+.disclaimer {
+  text-align: center;
+  font-size: 11px;
+  color: var(--theme-text-secondary, #b6bcc8);
+  padding: 10px 0 4px;
+  max-width: 900px;
+  margin: 0 auto;
 }
 
 /* ── 模型下拉菜单 ── */
@@ -1421,5 +1477,9 @@ function onShiftEnter() {
 /* ── 深色模式适配 ── */
 :global(html.dark) .msg-bubble.user {
   background: #4b5563;
+}
+:global(html.dark) .ai-bubble {
+  background: #1e1f2e;
+  border-color: #2a2b3d;
 }
 </style>

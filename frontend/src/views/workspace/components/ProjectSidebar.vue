@@ -1,5 +1,15 @@
 <template>
   <aside class="project-sidebar">
+    <!-- 品牌区 -->
+    <div class="sidebar-brand">
+      <div class="brand-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+      </div>
+      <span class="brand-name">AegisCode</span>
+    </div>
+
     <!-- 新建项目按钮 -->
     <div class="sidebar-top">
       <button class="new-project-btn" @click="showCreateDialog = true">
@@ -72,7 +82,7 @@
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
             <span class="session-title">{{ session.title || `会话 #${session.id}` }}</span>
-            <span class="session-status" :class="session.status" v-if="session.status === 'running'"></span>
+            <span class="session-status-tag" :class="session.status" v-if="session.status && session.status !== 'idle'">{{ statusLabelOf(session.status) }}</span>
             <span class="session-actions" @click.stop>
               <button class="session-action-btn" title="重命名" @click="startRename(session)">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -108,6 +118,34 @@
       </div>
 
       <div v-if="loading" class="loading-state">加载中...</div>
+    </div>
+
+    <!-- 底部用户区 -->
+    <div class="sidebar-user">
+      <div class="user-info" @click="showUserMenu = !showUserMenu">
+        <span class="user-avatar">{{ avatarChar }}</span>
+        <span class="user-name">{{ displayName }}</span>
+        <svg class="user-chevron" :class="{ open: showUserMenu }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </div>
+      <Transition name="menu-fade">
+        <div v-if="showUserMenu" class="user-menu" @click.stop>
+          <div class="user-menu-header">{{ userStore.username }}</div>
+          <div class="user-menu-item" @click="backToAdmin">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
+            </svg>
+            <span>返回管理后台</span>
+          </div>
+          <div class="user-menu-item danger" @click="handleLogout">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+            <span>退出登录</span>
+          </div>
+        </div>
+      </Transition>
     </div>
 
     <!-- 重命名弹窗 -->
@@ -196,9 +234,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive, defineExpose } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, reactive, defineExpose } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { workspaceApi, agentApi } from '@/api/aegis'
+import { useUserStore } from '@/stores/user'
 
 interface Project {
   id: number
@@ -246,6 +286,50 @@ function setExpanded(pid: number, val: boolean) {
 
 // ── 桌面端检测 (预留, 当前 Web 端固定 false) ──
 const isDesktop = ref(false)
+
+// ── 用户信息 ──
+const router = useRouter()
+const userStore = useUserStore()
+const showUserMenu = ref(false)
+const displayName = computed(() => userStore.nickname || userStore.username || '用户')
+const avatarChar = computed(() => displayName.value.charAt(0).toUpperCase())
+
+async function handleLogout() {
+  try {
+    await ElMessageBox.confirm('确定退出登录吗？', '提示', {
+      confirmButtonText: '退出',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    showUserMenu.value = false
+    await userStore.logout()
+    router.push('/workspace/login')
+  } catch { /* 取消 */ }
+}
+
+function backToAdmin() {
+  showUserMenu.value = false
+  router.push('/dashboard-monitor')
+}
+
+// 会话状态标签
+function statusLabelOf(status: string): string {
+  const map: Record<string, string> = {
+    running: '运行中',
+    paused: '已暂停',
+    completed: '已完成',
+    error: '异常',
+    cancelled: '已取消',
+  }
+  return map[status] || ''
+}
+
+// 点击外部关闭用户菜单
+function onUserMenuOutside(e: MouseEvent) {
+  if (showUserMenu.value && !(e.target as HTMLElement).closest('.sidebar-user')) {
+    showUserMenu.value = false
+  }
+}
 
 // ── 新建项目 ──
 const showCreateDialog = ref(false)
@@ -431,6 +515,10 @@ function pickLocalFolder() {
 
 onMounted(() => {
   loadProjects()
+  document.addEventListener('click', onUserMenuOutside)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onUserMenuOutside)
 })
 </script>
 
@@ -445,9 +533,35 @@ onMounted(() => {
   overflow: hidden;
 }
 
+/* 品牌区 */
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 16px 8px;
+  flex-shrink: 0;
+}
+.brand-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.brand-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--theme-text-color, #1f2937);
+  letter-spacing: -0.02em;
+}
+
 /* 新建按钮（放顶部，蓝色主按钮风格） */
 .sidebar-top {
-  padding: 12px 12px 4px;
+  padding: 8px 12px 4px;
 }
 .new-project-btn {
   width: 100%;
@@ -627,17 +741,34 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.session-status {
+.session-status-tag {
   flex-shrink: 0;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #22c55e;
-  animation: pulse 1.5s ease-in-out infinite;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  line-height: 1.4;
 }
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+.session-status-tag.running {
+  background: #dbeafe;
+  color: #2563eb;
+}
+.session-status-tag.paused {
+  background: #fef3c7;
+  color: #d97706;
+}
+.session-status-tag.completed {
+  background: #d1fae5;
+  color: #16a34a;
+}
+.session-status-tag.error {
+  background: #fee2e2;
+  color: #dc2626;
+}
+.session-status-tag.cancelled {
+  background: #f3f4f6;
+  color: #6b7280;
 }
 .session-actions {
   flex-shrink: 0;
@@ -762,6 +893,109 @@ onMounted(() => {
   text-align: center;
   font-size: 13px;
   color: var(--theme-text-secondary, #9ca3af);
+}
+
+/* ── 底部用户区 ── */
+.sidebar-user {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--theme-border-color, #e5e7eb);
+  position: relative;
+}
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.user-info:hover {
+  background: var(--theme-hover-bg, #f3f4f6);
+}
+.user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.user-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--theme-text-color, #374151);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-chevron {
+  flex-shrink: 0;
+  color: var(--theme-text-secondary, #9ca3af);
+  transition: transform 0.2s;
+}
+.user-chevron.open {
+  transform: rotate(180deg);
+}
+
+/* 用户弹出菜单 */
+.user-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 12px;
+  right: 12px;
+  background: var(--theme-card-bg, #fff);
+  border: 1px solid var(--theme-border-color, #e5e7eb);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.13);
+  padding: 4px;
+  z-index: 100;
+}
+.user-menu-header {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  color: var(--theme-text-secondary, #9ca3af);
+  border-bottom: 1px solid var(--theme-border-color, #f0f0f0);
+  margin-bottom: 2px;
+}
+.user-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--theme-text-color, #374151);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.user-menu-item:hover {
+  background: var(--theme-hover-bg, #f3f4f6);
+}
+.user-menu-item.danger {
+  color: #dc2626;
+}
+.user-menu-item.danger:hover {
+  background: #fef2f2;
+}
+
+/* 用户菜单动画 */
+.menu-fade-enter-active,
+.menu-fade-leave-active {
+  transition: opacity 0.15s, transform 0.15s;
+}
+.menu-fade-enter-from,
+.menu-fade-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
 }
 
 /* ── 弹窗 ── */
