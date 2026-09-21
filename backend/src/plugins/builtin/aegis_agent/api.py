@@ -338,18 +338,23 @@ async def list_messages(
 
     messages: list[dict] = []
     for s in steps:
-        # 用户消息（从 input_messages 中提取最后一条 user 消息）
+        # 用户消息（从 input_messages 中提取最后一条 user 消息）。
+        # 注意: input_messages 是完整 LLM 输入（含全部历史），
+        # 只有最后一条 user 是本步骤的新输入，取全部会导致跨轮重复。
         if s.step_type == "llm_call" and s.input_messages:
             try:
                 input_list = json.loads(s.input_messages) if isinstance(s.input_messages, str) else s.input_messages
-                for msg in input_list:
-                    if isinstance(msg, dict) and msg.get("role") == "user":
-                        messages.append({
-                            "role": "user",
-                            "content": msg.get("content", ""),
-                            "step_index": s.step_index,
-                            "created_at": s.created_at.isoformat() if s.created_at else None,
-                        })
+                user_msgs = [
+                    m for m in (input_list or [])
+                    if isinstance(m, dict) and m.get("role") == "user"
+                ]
+                if user_msgs:
+                    messages.append({
+                        "role": "user",
+                        "content": user_msgs[-1].get("content", ""),
+                        "step_index": s.step_index,
+                        "created_at": s.created_at.isoformat() if s.created_at else None,
+                    })
             except (json.JSONDecodeError, TypeError):
                 pass
 

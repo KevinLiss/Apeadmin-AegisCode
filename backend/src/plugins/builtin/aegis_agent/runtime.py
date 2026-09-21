@@ -307,14 +307,29 @@ class AgentRuntime:
         """
         active = self._active_runs.get(run_id)
         if not active:
-            raise ValueError(f"Run {run_id} not found or not active")
+            # 重启后内存丢失：尝试从 DB 重建上下文（仅限 single 会话）
+            async with SessionLocal() as db:
+                run = await db.get(AgentRun, run_id)
+                if not run:
+                    raise ValueError(f"Run {run_id} not found")
+                if run.workflow_type != "single":
+                    raise ValueError(f"Run {run_id} not found or not active")
+                context = await self._rebuild_context_from_db(run)
+                budget = self._rebuild_budget_from_db(run)
+                active = self._ActiveRun(run.id, context, budget)
+                self._active_runs[run.id] = active
+                logger.info(f"Rebuilt active run from DB: run={run_id}")
 
         # 用户 Token 限额检查
         async with SessionLocal() as db:
             run = await db.get(AgentRun, run_id)
             if not run:
                 raise ValueError(f"Run {run_id} not found")
-            if run.status not in (RunState.created.value, RunState.running.value, RunState.paused.value):
+            # 多轮对话：completed/cancelled/failed 的会话可继续发消息（重新激活为 running）。
+            # 仅 workflow（DAG 多智能体）运行保持原有状态限制。
+            if run.workflow_type != "single" and run.status not in (
+                RunState.created.value, RunState.running.value, RunState.paused.value,
+            ):
                 raise ValueError(f"Run {run_id} is {run.status}, cannot send message")
 
             # 查用户 token_limit
@@ -390,22 +405,86 @@ class AgentRuntime:
 
         raise ValueError(f"Unknown action: {action}")
 
-    async def get_status(self, run_id: int) -> dict[str, Any]:
-        """获取运行状态（含预算信息）。"""
-        active = self._active_runs.get(run_id)
-        if active:
-            return {
-                "status": "running" if not active.pause_event.is_set() else "paused",
-                "budget": active.budget.get_status(),
-                "step_count": active.step_counter,
-            }
+    async def _rebuild_context_from_db(self, run: AgentRun) -> LayeredContext:
+        """从 DB steps 重建 LayeredContext（重启恢复）。
 
+        遍历 llm_call 步骤的 input_messages（含用户输入与工具结果），
+        按 step_index 升序将 user / assistant / tool 消息还原到 working 层；
+        context_summary 作为摘要层恢复。
+        """
+        context = LayeredContext()
+
+        async with SessionLocal() as db:
+            stmt = (
+                select(AgentStep)
+                .where(
+                    AgentStep.run_id == run.id,
+                    AgentStep.step_type == StepType.llm_call.value,
+                )
+                .order_by(AgentStep.step_index.asc(), AgentStep.id.asc())
+            )
+            steps = list((await db.execute(stmt)).scalars().all())
+
+        for s in steps:
+            if not s.input_messages:
+                continue
+            try:
+                input_list = json.loads(s.input_messages)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            for msg in (input_list or []):
+                if not isinstance(msg, dict):
+                    continue
+                if msg.get("role") == "user":
+                    context.add_user_message(msg.get("content", ""))
+                elif msg.get("role") == "assistant" and msg.get("content"):
+                    tool_calls = msg.get("tool_calls")
+                    context.add_assistant_message(msg["content"], tool_calls)
+                elif msg.get("role") == "tool":
+                    context.add_tool_result(
+                        msg.get("tool_call_id", ""), msg.get("content", ""), msg.get("name"),
+                    )
+
+        # 恢复摘要层（压缩过的历史）
+        if run.context_summary:
+            context._summary = run.context_summary
+        return context
+
+    def _rebuild_budget_from_db(self, run: AgentRun) -> BudgetController:
+        """从 run 累计值重建 BudgetController（重启恢复）。"""
+        budget = BudgetController(BudgetConfig(
+            max_tokens=run.max_tokens,
+            max_steps=run.max_steps,
+        ))
+        budget.state.used_tokens = run.total_input_tokens + run.total_output_tokens
+        budget.state.used_cost = run.total_cost_usd
+        budget.state.step_count = run.step_count
+        return budget
+
+    async def get_status(self, run_id: int) -> dict[str, Any]:
+        """获取运行状态（含预算信息）。
+
+        DB 状态是真相源：内存 _active_runs 为支持多轮对话会长期保留，
+        不能仅凭内存存在就返回 running（否则 completed 的 run 永远误报）。
+        仅当 DB 状态为 running/paused 时，才用内存中的实时预算信息增强。
+        """
         async with SessionLocal() as db:
             run = await db.get(AgentRun, run_id)
             if not run:
                 raise ValueError(f"Run {run_id} not found")
+
+            status = run.status
+            active = self._active_runs.get(run_id)
+            if status in (RunState.running.value, RunState.paused.value) and active:
+                # 真正在跑：返回实时内存数据（含当前步进度）
+                return {
+                    "status": status,
+                    "budget": active.budget.get_status(),
+                    "step_count": active.step_counter,
+                }
+
             return {
-                "status": run.status,
+                "status": status,
                 "budget": {
                     "max_tokens": run.max_tokens,
                     "used_tokens": run.total_input_tokens + run.total_output_tokens,
@@ -555,8 +634,9 @@ class AgentRuntime:
                 total_usage.output_tokens += usage.output_tokens
                 total_usage.cost_usd += usage.cost_usd
 
-                # 保存 LLM step
+                # 保存 LLM step（含输入消息，供历史还原与重启后重建上下文）
                 await self._save_step(active.run_id, active.step_counter, StepType.llm_call, {
+                    "input_messages": json.dumps(llm_messages, ensure_ascii=False),
                     "output_content": msg.get("content", ""),
                     "reasoning_content": msg.get("reasoning_content") or msg.get("reasoning"),
                     "tool_calls_json": json.dumps(msg.get("tool_calls", []), ensure_ascii=False) if msg.get("tool_calls") else None,
@@ -687,6 +767,8 @@ class AgentRuntime:
                     if chunk_str == "[DONE]":
                         break
                     if active.cancel_event.is_set():
+                        # cancel 已在 control() 中直接落库为 cancelled，
+                        # 此处 yield 后 return（客户端断开不影响状态）
                         yield json.dumps({"type": "cancelled"}, ensure_ascii=False)
                         return
 
@@ -777,8 +859,9 @@ class AgentRuntime:
                         "budget": active.budget.get_status(),
                     }, ensure_ascii=False)
 
-                # 保存 LLM step
+                # 保存 LLM step（含输入消息，供历史还原与重启后重建上下文）
                 await self._save_step(active.run_id, active.step_counter, StepType.llm_call, {
+                    "input_messages": json.dumps(llm_messages, ensure_ascii=False),
                     "output_content": collected_content,
                     "reasoning_content": collected_reasoning or None,
                     "tool_calls_json": json.dumps(collected_tool_calls, ensure_ascii=False) if has_tool_calls else None,
@@ -790,14 +873,16 @@ class AgentRuntime:
 
                 if not has_tool_calls:
                     # 对话结束
+                    # 注意: finalize 必须在 yield done 之前执行。
+                    # 客户端收到 done 事件即断开 SSE 连接，生成器会被取消，
+                    # yield 之后的代码不再执行，run 状态将永远卡在 running。
                     active.context.add_assistant_message(collected_content)
+                    await self._finalize_run(active, collected_content)
                     yield json.dumps({
                         "type": "done",
                         "content": collected_content,
                         "budget": active.budget.get_status(),
                     }, ensure_ascii=False)
-
-                    await self._finalize_run(active, collected_content)
                     return
 
                 # 规范化 tool_calls
@@ -837,12 +922,12 @@ class AgentRuntime:
                         }, ensure_ascii=False)
 
                         if loop_check["level"] == "terminate" or active.loop_detector.should_terminate():
+                            await self._finalize_run(active, f"循环终止: {loop_check['reason']}")
                             yield json.dumps({
                                 "type": "done",
                                 "content": f"检测到循环，已终止: {loop_check['reason']}",
                                 "budget": active.budget.get_status(),
                             }, ensure_ascii=False)
-                            await self._finalize_run(active, f"循环终止: {loop_check['reason']}")
                             return
 
                     yield json.dumps({
@@ -867,16 +952,16 @@ class AgentRuntime:
                 # 继续下一轮（LLM 会基于工具结果继续生成）
 
             # 预算耗尽
+            await self._finalize_run(active, "预算耗尽")
             yield json.dumps({
                 "type": "budget_exhausted",
                 "budget": active.budget.get_status(),
             }, ensure_ascii=False)
-            await self._finalize_run(active, "预算耗尽")
 
         except Exception as e:
             logger.exception(f"Agent stream failed: {e}")
-            yield json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
             await self._fail_run(active, str(e))
+            yield json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
 
     # -----------------------------------------------------------------
     # LLM 调用
@@ -1032,6 +1117,7 @@ class AgentRuntime:
                 step_index=step_index,
                 step_type=step_type.value,
                 role=data.get("role"),
+                input_messages=data.get("input_messages"),
                 output_content=data.get("output_content"),
                 reasoning_content=data.get("reasoning_content"),
                 tool_calls_json=data.get("tool_calls_json"),
