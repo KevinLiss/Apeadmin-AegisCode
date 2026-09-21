@@ -63,6 +63,16 @@ async def seed_aegis_agent_data(db: AsyncSession) -> None:
         ("创建策略", "预算策略", "F", None, None, "aegis_budget:add", None, 1, 1),
         ("编辑策略", "预算策略", "F", None, None, "aegis_budget:edit", None, 2, 1),
         ("删除策略", "预算策略", "F", None, None, "aegis_budget:delete", None, 3, 1),
+        # 技能中心
+        ("技能中心", "AegisCode", "C", "skills", "aegis_agent/skills/index", "aegis_skill:list", "MagicStick", 6, 1),
+        ("创建技能", "技能中心", "F", None, None, "aegis_skill:add", None, 1, 1),
+        ("编辑技能", "技能中心", "F", None, None, "aegis_skill:edit", None, 2, 1),
+        ("删除技能", "技能中心", "F", None, None, "aegis_skill:delete", None, 3, 1),
+        # MCP 服务器管理
+        ("MCP 服务器", "AegisCode", "C", "mcp", "aegis_agent/mcp/index", "aegis_mcp:list", "Link", 7, 1),
+        ("创建服务器", "MCP 服务器", "F", None, None, "aegis_mcp:add", None, 1, 1),
+        ("编辑服务器", "MCP 服务器", "F", None, None, "aegis_mcp:edit", None, 2, 1),
+        ("删除服务器", "MCP 服务器", "F", None, None, "aegis_mcp:delete", None, 3, 1),
         # 运行详情为隐藏路由页（visible=0: 不出现在侧边栏，但动态路由正常注册）
         ("运行详情", "AegisCode", "C", "runs/:id", "aegis_agent/runs/detail", "aegis_agent:runs:detail", "View", 4, 0),
     ]

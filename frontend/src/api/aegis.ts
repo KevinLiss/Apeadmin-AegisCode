@@ -94,3 +94,24 @@ export const budgetApi = {
   matchPolicy: (params: { model_name?: string; user_id?: number; task_type?: string }) =>
     request.get('/aegis-budget/policies/match', { params }),
 }
+
+// ── 技能中心 ──
+export const skillApi = {
+  listSkills: (params?: any) => request.get('/aegis-skill/skills', { params }),
+  createSkill: (data: any) => request.post('/aegis-skill/skills', data),
+  updateSkill: (id: number, data: any) => request.put(`/aegis-skill/skills/${id}`, data),
+  deleteSkill: (id: number) => request.delete(`/aegis-skill/skills/${id}`),
+  listTools: (params?: any) => request.get('/aegis-skill/tools', { params }),
+  createTool: (data: any) => request.post('/aegis-skill/tools', data),
+  updateTool: (id: number, data: any) => request.put(`/aegis-skill/tools/${id}`, data),
+  deleteTool: (id: number) => request.delete(`/aegis-skill/tools/${id}`),
+}
+
+// ── MCP 服务器 ──
+export const mcpApi = {
+  listServers: (params?: any) => request.get('/aegis-mcp/servers', { params }),
+  createServer: (data: any) => request.post('/aegis-mcp/servers', data),
+  updateServer: (id: number, data: any) => request.put(`/aegis-mcp/servers/${id}`, data),
+  deleteServer: (id: number) => request.delete(`/aegis-mcp/servers/${id}`),
+  testServer: (id: number) => request.post(`/aegis-mcp/servers/${id}/test`),
+}

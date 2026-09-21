@@ -24,6 +24,13 @@ from src.plugins.builtin.aegis_agent.security_models import (  # noqa: F401
 from src.plugins.builtin.aegis_agent.budget_policy_models import (  # noqa: F401
     AgentBudgetPolicy,
 )
+from src.plugins.builtin.aegis_agent.skill_models import (  # noqa: F401
+    Skill,
+    ToolConfig,
+)
+from src.plugins.builtin.aegis_agent.mcp_server_models import (  # noqa: F401
+    McpServer,
+)
 from src.plugins.builtin.aegis_agent.seed import seed_aegis_agent_data
 
 
@@ -67,6 +74,9 @@ class AegisAgentPlugin(PluginInterface):
                         UserActionLog.__table__,
                         SanitizeRule.__table__,
                         AgentBudgetPolicy.__table__,
+                        Skill.__table__,
+                        ToolConfig.__table__,
+                        McpServer.__table__,
                     ],
                 )
             )
@@ -112,10 +122,14 @@ class AegisAgentPlugin(PluginInterface):
         from src.plugins.builtin.aegis_agent.api import router
         from src.plugins.builtin.aegis_agent.security_api import router as security_router
         from src.plugins.builtin.aegis_agent.budget_policy_api import router as budget_router
+        from src.plugins.builtin.aegis_agent.skill_api import router as skill_router
+        from src.plugins.builtin.aegis_agent.mcp_server_api import router as mcp_router
 
         app.include_router(router, prefix=settings.API_PREFIX)
         app.include_router(security_router, prefix=settings.API_PREFIX)
         app.include_router(budget_router, prefix=settings.API_PREFIX)
+        app.include_router(skill_router, prefix=settings.API_PREFIX)
+        app.include_router(mcp_router, prefix=settings.API_PREFIX)
 
         # 订阅事件（示例：日志记录）
         event_bus.on(

@@ -40,6 +40,7 @@ async def seed_aegis_workspace_data(db: AsyncSession) -> None:
         ("删除项目", "工作区管理", "F", None, None, "aegis_workspace:projects:delete", None, 3),
         ("执行命令", "工作区管理", "F", None, None, "aegis_workspace:execute", None, 4),
         ("Git 快照", "工作区管理", "F", None, None, "aegis_workspace:snapshot", None, 5),
+        ("成员管理", "工作区管理", "F", None, None, "aegis_workspace:members:manage", None, 6),
     ]
 
     existing = list((await db.execute(select(Menu))).scalars().all())

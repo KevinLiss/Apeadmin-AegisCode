@@ -13,6 +13,9 @@ from src.plugins.builtin.aegis_workspace.models import (  # noqa: F401
     WorkspaceProject,
     WorkspaceSnapshot,
 )
+from src.plugins.builtin.aegis_workspace.member_models import (  # noqa: F401
+    WorkspaceProjectMember,
+)
 from src.plugins.builtin.aegis_workspace.seed import seed_aegis_workspace_data
 
 
@@ -51,6 +54,7 @@ class AegisWorkspacePlugin(PluginInterface):
                         WorkspaceFile.__table__,
                         WorkspaceSnapshot.__table__,
                         WorkspaceExecution.__table__,
+                        WorkspaceProjectMember.__table__,
                     ],
                 )
             )
@@ -69,6 +73,7 @@ class AegisWorkspacePlugin(PluginInterface):
                     lambda sync_conn: Base.metadata.drop_all(
                         sync_conn,
                         tables=[
+                            WorkspaceProjectMember.__table__,
                             WorkspaceExecution.__table__,
                             WorkspaceSnapshot.__table__,
                             WorkspaceFile.__table__,
@@ -87,9 +92,11 @@ class AegisWorkspacePlugin(PluginInterface):
     def register(self, app: FastAPI) -> None:
         """注册路由。"""
         from src.plugins.builtin.aegis_workspace.api import router
+        from src.plugins.builtin.aegis_workspace.member_api import router as member_router
 
         app.include_router(router, prefix=settings.API_PREFIX)
-        logger.info("[AegisWorkspace] registered — routes")
+        app.include_router(member_router, prefix=settings.API_PREFIX)
+        logger.info("[AegisWorkspace] registered — routes (incl. members)")
 
     def register_mcp_tools(self) -> None:
         """注册 MCP 工具。"""

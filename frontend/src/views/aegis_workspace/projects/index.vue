@@ -38,10 +38,11 @@
         </template>
       </el-table-column>
       <el-table-column prop="created_at" label="创建时间" width="170" />
-      <el-table-column label="操作" width="200" fixed="right">
+      <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openExecute(row.id)" v-permission="'aegis_workspace:execute'">执行命令</el-button>
           <el-button link type="success" size="small" @click="openSnapshots(row.id)" v-permission="'aegis_workspace:snapshot'">快照</el-button>
+          <el-button link type="primary" size="small" @click="openMembers(row)" v-permission="'aegis_workspace:members:manage'">成员</el-button>
           <el-button link type="danger" size="small" @click="handleDelete(row)" v-permission="'aegis_workspace:projects:delete'">删除</el-button>
         </template>
       </el-table-column>
@@ -134,6 +135,94 @@
         <el-table-column prop="created_at" label="时间" width="160" />
       </el-table>
     </el-dialog>
+
+    <!-- 成员管理弹窗 -->
+    <el-dialog v-model="memberDialogVisible" :title="`项目成员 — ${memberProject?.name || ''}`" width="780px" top="6vh">
+      <el-alert
+        title="成员角色决定默认权限，可单独勾选权限点覆盖默认值"
+        type="info" :closable="false" style="margin-bottom: 12px"
+      />
+      <div class="member-toolbar">
+        <el-select
+          v-model="addMemberUserId" filterable remote :remote-method="searchCandidates"
+          :loading="candidateLoading" placeholder="搜索用户名/昵称添加成员" style="width: 280px"
+        >
+          <el-option v-for="c in candidates" :key="c.user_id" :value="c.user_id"
+            :label="`${c.nickname} (${c.username})`" />
+        </el-select>
+        <el-select v-model="addMemberRole" style="width: 130px">
+          <el-option v-for="r in memberRoleDict.roles" :key="r.value" :value="r.value" :label="r.label.split(' —')[0]" />
+        </el-select>
+        <el-button type="primary" :disabled="!addMemberUserId" :loading="addingMember" @click="handleAddMember">
+          添加成员
+        </el-button>
+      </div>
+      <el-table :data="members" stripe size="small" style="margin-top: 12px">
+        <el-table-column label="成员" min-width="160">
+          <template #default="{ row }">
+            <div class="member-cell">
+              <el-avatar :size="28" :src="row.avatar">{{ row.nickname?.charAt(0) }}</el-avatar>
+              <div>
+                <div class="member-name">{{ row.nickname }} <span class="member-username">@{{ row.username }}</span></div>
+                <div class="member-email">{{ row.email }}</div>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="角色" width="130">
+          <template #default="{ row }">
+            <el-tag :type="roleTagType(row.role)" size="small" effect="dark">{{ roleLabel(row.role) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="权限" min-width="200">
+          <template #default="{ row }">
+            <div class="perm-tags">
+              <el-tag v-for="p in row.permissions" :key="p" size="small" type="info">{{ permLabel(p) }}</el-tag>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="added_at" label="加入时间" width="100">
+          <template #default="{ row }">{{ row.added_at?.slice(0, 10) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="140" fixed="right">
+          <template #default="{ row }">
+            <template v-if="row.role !== 'owner'">
+              <el-button link type="primary" size="small" @click="openEditMember(row)">编辑</el-button>
+              <el-button link type="danger" size="small" @click="handleRemoveMember(row)">移除</el-button>
+            </template>
+            <span v-else class="owner-hint">—</span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+
+    <!-- 编辑成员弹窗 -->
+    <el-dialog v-model="editMemberVisible" title="编辑成员角色与权限" width="520px">
+      <el-form label-width="80px">
+        <el-form-item label="成员">
+          <span>{{ editMemberForm.nickname }} (@{{ editMemberForm.username }})</span>
+        </el-form-item>
+        <el-form-item label="角色">
+          <el-select v-model="editMemberForm.role" style="width: 100%" @change="onEditRoleChange">
+            <el-option v-for="r in memberRoleDict.roles" :key="r.value" :value="r.value" :label="r.label" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="权限">
+          <el-checkbox-group v-model="editMemberForm.permissions">
+            <div class="perm-list">
+              <el-checkbox v-for="p in memberRoleDict.permissions" :key="p.value" :value="p.value">
+                {{ p.value }} — {{ p.label.split(' —')[0] }}
+              </el-checkbox>
+            </div>
+          </el-checkbox-group>
+          <div class="perm-tip">留空则使用角色默认权限</div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editMemberVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingMember" @click="handleSaveMember">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -164,6 +253,160 @@ const execResult = ref<any>(null)
 const snapshotDialogVisible = ref(false)
 const snapshots = ref([])
 const creatingSnapshot = ref(false)
+
+// ---------- 成员管理 ----------
+interface MemberRow {
+  user_id: number
+  username: string
+  nickname: string
+  avatar: string | null
+  email: string | null
+  role: string
+  permissions: string[]
+  added_at: string | null
+}
+interface CandidateRow {
+  user_id: number
+  username: string
+  nickname: string
+  email: string | null
+}
+interface RoleDict {
+  roles: { value: string; label: string }[]
+  role_defaults: Record<string, string[]>
+  permissions: { value: string; label: string }[]
+}
+
+const memberDialogVisible = ref(false)
+const memberProject = ref<any>(null)
+const members = ref<MemberRow[]>([])
+const memberRoleDict = ref<RoleDict>({ roles: [], role_defaults: {}, permissions: [] })
+const candidates = ref<CandidateRow[]>([])
+const candidateLoading = ref(false)
+const addMemberUserId = ref<number | null>(null)
+const addMemberRole = ref('member')
+const addingMember = ref(false)
+
+const editMemberVisible = ref(false)
+const savingMember = ref(false)
+const editMemberForm = reactive({
+  user_id: 0, username: '', nickname: '', role: 'member', permissions: [] as string[],
+})
+
+function roleLabel(role: string): string {
+  const r = memberRoleDict.value.roles.find(x => x.value === role)
+  if (r) return r.label.split(' —')[0]
+  const map: Record<string, string> = { owner: '创建者', admin: '管理员', developer: '开发者', member: '成员', viewer: '访客' }
+  return map[role] || role
+}
+
+function roleTagType(role: string): string {
+  const map: Record<string, string> = { owner: 'warning', admin: 'danger', developer: 'success', member: 'primary', viewer: 'info' }
+  return map[role] || 'info'
+}
+
+function permLabel(p: string): string {
+  if (p.endsWith(':*')) return `${p}(全部)`
+  return p
+}
+
+async function openMembers(row: any) {
+  memberProject.value = row
+  memberDialogVisible.value = true
+  addMemberUserId.value = null
+  addMemberRole.value = 'member'
+  await Promise.all([fetchMembers(row.id), fetchRoleDict(row.id), searchCandidates('')])
+}
+
+async function fetchMembers(projectId: number) {
+  try {
+    const res: any = await request.get(`/aegis-workspace/projects/${projectId}/members`)
+    members.value = res || []
+  } catch {
+    members.value = []
+  }
+}
+
+async function fetchRoleDict(projectId: number) {
+  try {
+    const res: any = await request.get(`/aegis-workspace/projects/${projectId}/members/roles`)
+    memberRoleDict.value = res || { roles: [], role_defaults: {}, permissions: [] }
+  } catch {
+    memberRoleDict.value = { roles: [], role_defaults: {}, permissions: [] }
+  }
+}
+
+async function searchCandidates(keyword: string) {
+  if (!memberProject.value) return
+  candidateLoading.value = true
+  try {
+    const res: any = await request.get(`/aegis-workspace/projects/${memberProject.value.id}/members/candidates`, {
+      params: { keyword: keyword || undefined },
+    })
+    candidates.value = res || []
+  } catch {
+    candidates.value = []
+  } finally {
+    candidateLoading.value = false
+  }
+}
+
+async function handleAddMember() {
+  if (!memberProject.value || !addMemberUserId.value) return
+  addingMember.value = true
+  try {
+    await request.post(`/aegis-workspace/projects/${memberProject.value.id}/members`, {
+      user_id: addMemberUserId.value,
+      role: addMemberRole.value,
+      permissions: memberRoleDict.value.role_defaults[addMemberRole.value] || [],
+    })
+    ElMessage.success('成员已添加')
+    addMemberUserId.value = null
+    await Promise.all([fetchMembers(memberProject.value.id), searchCandidates('')])
+  } finally {
+    addingMember.value = false
+  }
+}
+
+function openEditMember(row: MemberRow) {
+  editMemberForm.user_id = row.user_id
+  editMemberForm.username = row.username
+  editMemberForm.nickname = row.nickname
+  editMemberForm.role = row.role
+  editMemberForm.permissions = [...row.permissions]
+  editMemberVisible.value = true
+}
+
+function onEditRoleChange() {
+  // 切换角色时重置为该角色默认权限
+  editMemberForm.permissions = [...(memberRoleDict.value.role_defaults[editMemberForm.role] || [])]
+}
+
+async function handleSaveMember() {
+  if (!memberProject.value) return
+  savingMember.value = true
+  try {
+    await request.put(
+      `/aegis-workspace/projects/${memberProject.value.id}/members/${editMemberForm.user_id}`,
+      { role: editMemberForm.role, permissions: editMemberForm.permissions }
+    )
+    ElMessage.success('成员已更新')
+    editMemberVisible.value = false
+    await fetchMembers(memberProject.value.id)
+  } finally {
+    savingMember.value = false
+  }
+}
+
+async function handleRemoveMember(row: MemberRow) {
+  if (!memberProject.value) return
+  await ElMessageBox.confirm(
+    `确定将「${row.nickname}」移出项目吗？`, '提示', { type: 'warning' }
+  )
+  await request.delete(`/aegis-workspace/projects/${memberProject.value.id}/members/${row.user_id}`)
+  ElMessage.success('成员已移除')
+  await Promise.all([fetchMembers(memberProject.value.id), searchCandidates('')])
+}
 
 async function fetchList() {
   loading.value = true
@@ -279,4 +522,15 @@ onMounted(() => {
   font-size: 12px; max-height: 200px; overflow-y: auto; white-space: pre-wrap;
 }
 .output-box.error { color: #f48771; }
+
+/* 成员管理 */
+.member-toolbar { display: flex; gap: 8px; align-items: center; }
+.member-cell { display: flex; align-items: center; gap: 8px; }
+.member-name { font-size: 13px; font-weight: 500; }
+.member-username { color: #999; font-size: 12px; font-weight: normal; }
+.member-email { color: #bbb; font-size: 12px; }
+.perm-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.owner-hint { color: #ccc; }
+.perm-list { display: flex; flex-direction: column; gap: 2px; }
+.perm-tip { font-size: 12px; color: #999; margin-top: 4px; }
 </style>
