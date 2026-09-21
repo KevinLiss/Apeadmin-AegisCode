@@ -70,6 +70,16 @@ class RunRename(BaseModel):
     title: str = Field(..., min_length=1, max_length=100, description="新标题")
 
 
+class RunPin(BaseModel):
+    """置顶/取消置顶。"""
+    is_pinned: bool = Field(..., description="是否置顶")
+
+
+class RunArchive(BaseModel):
+    """归档/取消归档。"""
+    is_archived: bool = Field(..., description="是否归档")
+
+
 # ---------------------------------------------------------------------------
 # 响应模型
 # ---------------------------------------------------------------------------
@@ -95,6 +105,8 @@ class RunOut(BaseModel):
     workflow_type: str = "single"
     current_role: str | None = None
     error_message: str | None = None
+    is_pinned: bool = False
+    is_archived: bool = False
     created_at: datetime
     updated_at: datetime
 

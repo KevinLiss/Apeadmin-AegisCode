@@ -101,6 +101,14 @@ class AgentRun(IDMixin, TimestampMixin, Base):
         Text, nullable=True, comment="旧轮压缩摘要（分层上下文的摘要层）"
     )
 
+    # 会话管理
+    is_pinned: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, comment="置顶"
+    )
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, index=True, comment="归档"
+    )
+
     def __repr__(self) -> str:
         return f"<AgentRun {self.id} status={self.status}>"
 

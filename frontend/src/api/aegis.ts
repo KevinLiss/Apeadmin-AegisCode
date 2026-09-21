@@ -43,18 +43,24 @@ export const agentApi = {
     system_prompt?: string
   }) => request.post('/aegis-agent/runs', data),
 
-  listRuns: (params?: { page?: number; page_size?: number; status?: string; workspace_id?: number }) =>
+  listRuns: (params?: { page?: number; page_size?: number; status?: string; workspace_id?: number; include_archived?: boolean }) =>
     request.get('/aegis-agent/runs', { params }),
 
   renameRun: (runId: number, title: string) =>
     request.put(`/aegis-agent/runs/${runId}/title`, { title }),
+
+  pinRun: (runId: number, isPinned: boolean) =>
+    request.put(`/aegis-agent/runs/${runId}/pin`, { is_pinned: isPinned }),
+
+  archiveRun: (runId: number, isArchived: boolean) =>
+    request.put(`/aegis-agent/runs/${runId}/archive`, { is_archived: isArchived }),
 
   getRun: (runId: number) => request.get(`/aegis-agent/runs/${runId}`),
 
   deleteRun: (runId: number) => request.delete(`/aegis-agent/runs/${runId}`),
 
   /** 发送消息 — stream=true 返回 fetch Response（SSE），stream=false 返回结果 */
-  sendMessage: (runId: number, content: string, stream = true): Promise<Response> | Promise<any> => {
+  sendMessage: (runId: number, content: string, stream = true, signal?: AbortSignal): Promise<Response> | Promise<any> => {
     if (stream) {
       // SSE 用原生 fetch（axios 不支持流式）
       const token = localStorage.getItem('apeadmin_token') || ''
@@ -65,6 +71,7 @@ export const agentApi = {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ content, stream: true }),
+        signal,
       }) as Promise<Response>
     }
     return request.post(`/aegis-agent/runs/${runId}/message`, { content, stream: false })

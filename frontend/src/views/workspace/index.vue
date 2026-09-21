@@ -3,8 +3,7 @@
     <!-- 顶部导航栏 -->
     <header class="workspace-header">
       <div class="header-left">
-        <span class="workspace-brand">AegisCode</span>
-        <span class="workspace-separator">/</span>
+        <span class="online-indicator" title="在线"></span>
         <span class="workspace-project-name" v-if="currentProject">{{ currentProject.name }}</span>
         <span class="workspace-project-name placeholder" v-else>选择项目</span>
         <span class="version-badge">v{{ appVersion }}</span>
@@ -33,26 +32,6 @@
           </svg>
           <span>Git</span>
         </button>
-
-        <!-- 用户菜单（同后台用户体系） -->
-        <el-dropdown trigger="click" @command="onUserCommand">
-          <button class="header-pill user-pill">
-            <span class="user-avatar">{{ avatarChar }}</span>
-            <span class="user-name">{{ displayName }}</span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item disabled>
-                <span class="dropdown-userinfo">{{ userStore.username }}</span>
-              </el-dropdown-item>
-              <el-dropdown-item divided command="admin">返回管理后台</el-dropdown-item>
-              <el-dropdown-item command="logout"><span class="logout-text">退出登录</span></el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
       </div>
     </header>
 
@@ -62,19 +41,21 @@
         ref="projectSidebarRef"
         :current-project-id="currentProjectId"
         :current-session-id="currentSessionId"
+        :active-run-status="runStatus"
         @select-project="onSelectProject"
         @select-session="onSelectSession"
         @create-session="onCreateSession"
       />
 
-      <!-- 中间对话区 -->
+      <!-- 中间对话区（key 只含项目：同项目内切换会话不销毁组件，SSE 流不中断） -->
       <ChatArea
         v-if="currentProject"
-        :key="`chat-${currentProject.id}-${currentSessionId ?? 'new'}`"
+        :key="`chat-${currentProject.id}`"
         :project="currentProject"
         :session-id="currentSessionId"
         @run-status-change="onRunStatusChange"
         @session-created="onSessionCreated"
+        @streaming-change="onStreamingChange"
       />
       <!-- 空状态 -->
       <div class="workspace-empty" v-else>
@@ -114,48 +95,18 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
 import pkg from '../../../package.json'
-import { useUserStore } from '@/stores/user'
 import ProjectSidebar from './components/ProjectSidebar.vue'
 import ChatArea from './components/ChatArea.vue'
 import FilesPanel from './components/FilesPanel.vue'
 import GitPanel from './components/GitPanel.vue'
 import ProjectPanel from './components/ProjectPanel.vue'
 
-const router = useRouter()
-const userStore = useUserStore()
-
-// ── 版本号（package.json，随构建更新） ──
 const appVersion = pkg.version
 
-// ── 用户信息 ──
-const displayName = computed(() => userStore.nickname || userStore.username || '用户')
-const avatarChar = computed(() => displayName.value.charAt(0).toUpperCase())
-
-onMounted(async () => {
-  // 工作台直接进入时（无后台 Layout 预加载），确保用户信息已拉取
-  if (!userStore.username) {
-    try { await userStore.fetchUserInfo() } catch { /* 401 由拦截器处理 */ }
-  }
+onMounted(() => {
+  // 用户信息由侧边栏底部用户区管理
 })
-
-async function onUserCommand(command: string) {
-  if (command === 'admin') {
-    router.push('/dashboard-monitor')
-  } else if (command === 'logout') {
-    try {
-      await ElMessageBox.confirm('确定退出登录吗？', '提示', {
-        confirmButtonText: '退出',
-        cancelButtonText: '取消',
-        type: 'warning',
-      })
-      await userStore.logout()
-      router.push('/workspace/login')
-    } catch { /* 取消 */ }
-  }
-}
 
 // ── 项目状态 ──
 const currentProjectId = ref<number | null>(null)
@@ -192,6 +143,15 @@ const statusLabel = computed(() => {
 
 function onRunStatusChange(status: string) {
   runStatus.value = status as typeof runStatus.value
+}
+
+// ChatArea 流式渲染中即视为运行中（含多轮后续消息），同步顶栏状态
+function onStreamingChange(streaming: boolean) {
+  if (streaming) {
+    runStatus.value = 'running'
+  } else if (runStatus.value === 'running') {
+    runStatus.value = 'completed'
+  }
 }
 
 // ── 事件处理 ──
@@ -251,6 +211,14 @@ function onSessionCreated(sessionId: number) {
   align-items: center;
   gap: 10px;
 }
+.online-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 4px rgba(34, 197, 94, 0.5);
+  flex-shrink: 0;
+}
 .header-right {
   display: flex;
   align-items: center;
@@ -271,13 +239,10 @@ function onSessionCreated(sessionId: number) {
   border-radius: 10px;
   flex-shrink: 0;
 }
-.workspace-separator {
-  color: var(--theme-text-secondary, #9ca3af);
-  font-size: 14px;
-}
 .workspace-project-name {
   font-size: 14px;
-  color: var(--theme-text-secondary, #6b7280);
+  font-weight: 600;
+  color: var(--theme-text-color, #1f2937);
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -285,7 +250,8 @@ function onSessionCreated(sessionId: number) {
 }
 .workspace-project-name.placeholder {
   font-style: italic;
-  opacity: 0.6;
+  opacity: 0.5;
+  font-weight: 400;
 }
 .header-pill {
   display: flex;
@@ -311,74 +277,6 @@ function onSessionCreated(sessionId: number) {
   background: var(--el-color-primary, #4f46e5);
   border-color: var(--el-color-primary, #4f46e5);
   color: #fff;
-}
-
-/* ── 用户菜单 ── */
-.user-pill { margin-left: 4px; }
-.user-avatar {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #4f46e5, #7c3aed);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.user-name {
-  max-width: 96px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.dropdown-userinfo { color: var(--theme-text-secondary, #6b7280); font-size: 12px; }
-.logout-text { color: var(--el-color-danger, #f56c6c); }
-
-/* ── 状态指示器 ── */
-.status-indicator {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 500;
-  margin-right: 4px;
-  background: var(--theme-hover-bg, #f3f4f6);
-  color: var(--theme-text-secondary, #6b7280);
-}
-.status-indicator.running {
-  background: #dcfce7;
-  color: #15803d;
-}
-.status-indicator.running .status-dot {
-  background: #22c55e;
-  animation: pulse 1.5s ease-in-out infinite;
-}
-.status-indicator.paused {
-  background: #fef3c7;
-  color: #a16207;
-}
-.status-indicator.completed {
-  background: #e0e7ff;
-  color: #4338ca;
-}
-.status-indicator.error {
-  background: #fee2e2;
-  color: #dc2626;
-}
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--theme-text-secondary, #9ca3af);
-}
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
 }
 
 /* ── 主体 ── */

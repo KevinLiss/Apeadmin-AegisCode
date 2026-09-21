@@ -215,6 +215,8 @@ class AgentRuntime:
 
     def __init__(self):
         self._active_runs: dict[int, AgentRuntime._ActiveRun] = {}
+        # 后台任务注册表: run_id -> asyncio.Task（切换会话/断开 SSE 不中断）
+        self._bg_tasks: dict[int, asyncio.Task] = {}
 
     class _ActiveRun:
         """内存中的活跃运行上下文。"""
@@ -226,6 +228,27 @@ class AgentRuntime:
             self.cancel_event = asyncio.Event()
             self.pause_event = asyncio.Event()
             self.step_counter = 0
+            # 事件广播（后台任务写入，SSE 订阅者消费）
+            self.event_queues: list[asyncio.Queue] = []
+            self.finished = asyncio.Event()
+
+        def publish(self, event: str) -> None:
+            """向所有 SSE 订阅者广播事件。"""
+            for q in self.event_queues:
+                try:
+                    q.put_nowait(event)
+                except asyncio.QueueFull:
+                    pass
+
+        def subscribe(self, maxsize: int = 2000) -> asyncio.Queue:
+            """订阅事件流（SSE 连接生命周期内调用）。"""
+            q: asyncio.Queue = asyncio.Queue(maxsize=maxsize)
+            self.event_queues.append(q)
+            return q
+
+        def unsubscribe(self, q: asyncio.Queue) -> None:
+            if q in self.event_queues:
+                self.event_queues.remove(q)
 
     # -----------------------------------------------------------------
     # 公开接口
@@ -317,8 +340,15 @@ class AgentRuntime:
                 context = await self._rebuild_context_from_db(run)
                 budget = self._rebuild_budget_from_db(run)
                 active = self._ActiveRun(run.id, context, budget)
+                # step_counter 从 DB 累计值起步，避免重建后从 0 重编号
+                # （新 step_index 会与历史 step 冲突，且覆盖 run.step_count）
+                active.step_counter = run.step_count
                 self._active_runs[run.id] = active
                 logger.info(f"Rebuilt active run from DB: run={run_id}")
+
+        # 防呆：同一会话后台任务运行中，禁止并发发消息（避免两个循环操作同一 context）
+        if run_id in self._bg_tasks and not self._bg_tasks[run_id].done():
+            raise ValueError("该会话正在运行中，请等待完成后再发新消息")
 
         # 用户 Token 限额检查
         async with SessionLocal() as db:
@@ -365,9 +395,77 @@ class AgentRuntime:
                 await db.commit()
 
         if stream:
-            return self._run_loop_stream(active, content)
+            # 后台任务执行对话循环（与 SSE 连接解耦：切换会话/断开不中断）
+            async def _bg_runner():
+                """后台执行对话循环，事件通过 active.publish 广播给订阅者。"""
+                try:
+                    async for event in self._run_loop_stream(active, content):
+                        active.publish(event)
+                except Exception as e:  # noqa: BLE001
+                    logger.exception(f"Agent background run failed: {e}")
+                    active.publish(json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False))
+                finally:
+                    active.finished.set()
+                    self._bg_tasks.pop(run_id, None)
+
+            # 多轮对话：重置上一轮的终止信号，否则 _subscribe_stream 会因
+            # finished 已置位而立即结束（SSE 秒断、页面无渲染）
+            active.finished.clear()
+            active.cancel_event.clear()
+            active.pause_event.clear()
+            self._bg_tasks[run_id] = asyncio.create_task(_bg_runner())
+            # 返回订阅生成器（SSE 端点消费）
+            return self._subscribe_stream(active)
         else:
             return await self._run_loop_non_stream(active, content)
+
+    async def _subscribe_stream(self, active: _ActiveRun) -> AsyncGenerator[str, None]:
+        """订阅后台任务的事件流。
+
+        - 客户端断开（GeneratorExit）只影响本生成器，后台任务继续
+        - 重新连接的订阅者（切回会话）从当前事件继续接收
+        """
+        q = active.subscribe()
+        try:
+            while True:
+                try:
+                    # 后台任务结束且队列排空 → 结束
+                    if active.finished.is_set() and q.empty():
+                        break
+                    event = await asyncio.wait_for(q.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+                yield event
+                # done/error/cancelled 事件是终止信号，结束订阅
+                try:
+                    evt = json.loads(event)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if evt.get("type") in ("done", "error", "cancelled"):
+                    break
+        finally:
+            active.unsubscribe(q)
+
+    async def subscribe_run(self, run_id: int) -> AsyncGenerator[str, None]:
+        """重新订阅运行中的 run（切回会话续接事件流）。
+
+        - run 在后台运行中：返回续接的事件流
+        - run 已结束/不存在：抛 ValueError（前端按状态展示）
+        """
+        active = self._active_runs.get(run_id)
+        if not active:
+            raise ValueError(f"Run {run_id} not found or not active")
+
+        async with SessionLocal() as db:
+            run = await db.get(AgentRun, run_id)
+            if not run or run.status not in (RunState.running.value, RunState.paused.value):
+                raise ValueError(f"Run {run_id} is not running")
+
+        # 若后台任务已结束（刚完成的瞬间），不再续接
+        if run_id in self._bg_tasks and self._bg_tasks[run_id].done():
+            raise ValueError(f"Run {run_id} is not running")
+
+        return self._subscribe_stream(active)
 
     async def control(self, run_id: int, action: str) -> dict[str, Any]:
         """控制运行: pause / resume / cancel。"""
@@ -451,12 +549,19 @@ class AgentRuntime:
         return context
 
     def _rebuild_budget_from_db(self, run: AgentRun) -> BudgetController:
-        """从 run 累计值重建 BudgetController（重启恢复）。"""
+        """从 run 累计值重建 BudgetController（重启恢复）。
+
+        口径与内存扣减一致（budget.py UsageRecord.total_tokens）:
+        cache_read 是缓存命中不重复扣预算，重建时同样扣除，
+        否则长对话（缓存命中高）重启后会被误判预算耗尽。
+        """
         budget = BudgetController(BudgetConfig(
             max_tokens=run.max_tokens,
             max_steps=run.max_steps,
         ))
-        budget.state.used_tokens = run.total_input_tokens + run.total_output_tokens
+        budget.state.used_tokens = (
+            run.total_input_tokens + run.total_output_tokens - run.total_cache_read
+        )
         budget.state.used_cost = run.total_cost_usd
         budget.state.step_count = run.step_count
         return budget
@@ -483,13 +588,15 @@ class AgentRuntime:
                     "step_count": active.step_counter,
                 }
 
+            # 口径统一：used = input + output - cache_read（与内存扣减一致）
+            used = run.total_input_tokens + run.total_output_tokens - run.total_cache_read
             return {
                 "status": status,
                 "budget": {
                     "max_tokens": run.max_tokens,
-                    "used_tokens": run.total_input_tokens + run.total_output_tokens,
-                    "remaining_tokens": max(0, run.max_tokens - run.total_input_tokens - run.total_output_tokens),
-                    "usage_pct": round((run.total_input_tokens + run.total_output_tokens) / run.max_tokens * 100, 2) if run.max_tokens else 0,
+                    "used_tokens": used,
+                    "remaining_tokens": max(0, run.max_tokens - used),
+                    "usage_pct": round(used / run.max_tokens * 100, 2) if run.max_tokens else 0,
                     "total_cost_usd": float(run.total_cost_usd),
                     "max_steps": run.max_steps,
                     "step_count": run.step_count,
@@ -1174,9 +1281,11 @@ class AgentRuntime:
             )
             db.add(log)
 
-            # 同时写入安全中心 API 调用日志
+            # 同时写入安全中心 API 调用日志 + 维护 run 级 cache 累计
             run = await db.get(AgentRun, run_id)
             if run:
+                run.total_cache_read += usage.cache_read_tokens
+                run.total_cache_write += usage.cache_write_tokens
                 total = usage.input_tokens + usage.output_tokens + usage.cache_read_tokens + usage.cache_write_tokens + usage.reasoning_tokens
                 call_log = ApiCallLog(
                     user_id=run.user_id,
@@ -1207,7 +1316,8 @@ class AgentRuntime:
                 run.context_summary = active.context.summary
                 # token 累计由 _save_step 逐步累加（input/output 分开），
                 # 此处不再用 used_tokens 覆盖（used_tokens 含 output，语义不符）
-                run.step_count = active.step_counter
+                # step_count 取较大值：热重载重建后内存 counter 从 0 起，不应用 0 覆盖 DB 累计
+                run.step_count = max(run.step_count, active.step_counter)
                 await db.commit()
         logger.info(f"AgentRun completed: id={active.run_id} steps={active.step_counter}")
 
@@ -1218,7 +1328,7 @@ class AgentRuntime:
             if run:
                 run.status = RunState.failed.value
                 run.error_message = error
-                run.step_count = active.step_counter
+                run.step_count = max(run.step_count, active.step_counter)
                 await db.commit()
         logger.error(f"AgentRun failed: id={active.run_id} error={error}")
 

@@ -44,10 +44,12 @@ from src.plugins.builtin.aegis_agent.models import (
 from src.plugins.builtin.aegis_agent.runtime import agent_runtime, RunState
 from src.plugins.builtin.aegis_agent.schemas import (
     BudgetStatus,
+    RunArchive,
     RunControl,
     RunCreate,
     RunMessage,
     RunOut,
+    RunPin,
     RunRename,
     StepOut,
     UsageLogOut,
@@ -91,21 +93,30 @@ async def list_runs(
     page_size: int = Query(default=20, ge=1, le=100),
     status: str | None = Query(default=None),
     workspace_id: int | None = Query(default=None, description="按项目过滤会话"),
+    include_archived: bool = Query(default=False, description="是否包含已归档会话"),
 ):
-    """分页查询运行列表（工作台传 workspace_id 拉取项目下的会话）。"""
-    stmt = select(AgentRun).order_by(AgentRun.id.desc())
+    """分页查询运行列表（工作台传 workspace_id 拉取项目下的会话）。
+
+    - 默认排除归档会话，传 include_archived=true 时返回全部
+    - 置顶会话排在最前，其余按 id 倒序
+    """
+    stmt = select(AgentRun).order_by(
+        AgentRun.is_pinned.desc(), AgentRun.id.desc()
+    )
     if status:
         stmt = stmt.where(AgentRun.status == status)
     if workspace_id is not None:
         stmt = stmt.where(AgentRun.workspace_id == workspace_id)
+    if not include_archived:
+        stmt = stmt.where(AgentRun.is_archived == False)
 
     count_stmt = select(func.count()).select_from(AgentRun)
     if status:
         count_stmt = count_stmt.where(AgentRun.status == status)
     if workspace_id is not None:
         count_stmt = count_stmt.where(AgentRun.workspace_id == workspace_id)
-    if workspace_id is not None:
-        count_stmt = count_stmt.where(AgentRun.workspace_id == workspace_id)
+    if not include_archived:
+        count_stmt = count_stmt.where(AgentRun.is_archived == False)
 
     total = (await db.execute(count_stmt)).scalar() or 0
     stmt = stmt.offset((page - 1) * page_size).limit(page_size)
@@ -174,6 +185,40 @@ async def rename_run(
     return success_response(msg="已重命名")
 
 
+@router.put("/runs/{run_id}/pin")
+async def toggle_pin(
+    run_id: int,
+    body: RunPin,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("aegis_agent:runs:control"))],
+):
+    """置顶/取消置顶。"""
+    run = await db.get(AgentRun, run_id)
+    if not run:
+        raise NotFoundException("运行不存在")
+
+    run.is_pinned = body.is_pinned
+    await db.commit()
+    return success_response(msg="已置顶" if body.is_pinned else "已取消置顶")
+
+
+@router.put("/runs/{run_id}/archive")
+async def toggle_archive(
+    run_id: int,
+    body: RunArchive,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("aegis_agent:runs:control"))],
+):
+    """归档/取消归档。"""
+    run = await db.get(AgentRun, run_id)
+    if not run:
+        raise NotFoundException("运行不存在")
+
+    run.is_archived = body.is_archived
+    await db.commit()
+    return success_response(msg="已归档" if body.is_archived else "已取消归档")
+
+
 # ---------------------------------------------------------------------------
 # 运行交互
 # ---------------------------------------------------------------------------
@@ -202,6 +247,26 @@ async def send_message(
             return success_response(data=result)
     except ValueError as exc:
         # "Run X not found or not active" 等状态错误 → 404/400，而非未处理 500
+        if "not found" in str(exc):
+            raise NotFoundException(str(exc))
+        raise ValidationException(str(exc))
+
+
+@router.post("/runs/{run_id}/subscribe")
+async def subscribe_run(
+    run_id: int,
+    user: Annotated[User, Depends(require_permission("aegis_agent:runs:control"))],
+):
+    """重新订阅运行中的 run（切回会话时续接 SSE 事件流）。"""
+    try:
+        generator = await agent_runtime.subscribe_run(run_id)
+
+        async def _stream():
+            async for event in generator:
+                yield f"data: {event}\n\n"
+
+        return StreamingResponse(_stream(), media_type="text/event-stream")
+    except ValueError as exc:
         if "not found" in str(exc):
             raise NotFoundException(str(exc))
         raise ValidationException(str(exc))

@@ -71,30 +71,32 @@
 
         <!-- 会话列表 -->
         <div v-if="isExpanded(project.id)" class="session-list">
+          <!-- 归档切换 -->
+          <div v-if="hasArchived(project.id)" class="archive-toggle" @click="showArchived = !showArchived">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="4" width="20" height="5" rx="1"/><path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9"/><line x1="10" y1="13" x2="14" y2="13"/>
+            </svg>
+            <span>{{ showArchived ? '返回活跃会话' : '查看归档' }}</span>
+          </div>
+
           <div
             v-for="session in sessionsOf(project.id)"
             :key="session.id"
             class="session-item"
-            :class="{ active: currentSessionId === session.id && project.id === currentProjectId }"
+            :class="{ active: currentSessionId === session.id && project.id === currentProjectId, pinned: session.is_pinned }"
             @click="onSessionClick(project.id, session.id)"
+            @contextmenu="onSessionContextMenu($event, session)"
           >
-            <svg class="session-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <svg v-if="session.is_pinned" class="pin-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+              <path d="M16 2v5l-3 3v6l-1 1-1-1v-6l-3-3V2h8z"/>
+            </svg>
+            <svg v-else class="session-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
             <span class="session-title">{{ session.title || `会话 #${session.id}` }}</span>
-            <span class="session-status-tag" :class="session.status" v-if="session.status && session.status !== 'idle'">{{ statusLabelOf(session.status) }}</span>
-            <span class="session-actions" @click.stop>
-              <button class="session-action-btn" title="重命名" @click="startRename(session)">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                </svg>
-              </button>
-              <button class="session-action-btn danger" title="删除会话" @click="deleteSession(session)">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                </svg>
-              </button>
+            <span class="session-status-tag" :class="session.status" v-if="session.status && session.status !== 'idle' && session.status !== 'created'">{{ statusLabelOf(session.status) }}</span>
+            <span class="session-more-btn" @click.stop="onSessionContextMenu($event, session)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
             </span>
           </div>
 
@@ -107,7 +109,7 @@
           </div>
 
           <div v-if="!sessionsLoading[project.id] && sessionsOf(project.id).length === 0" class="session-empty">
-            暂无会话
+            {{ showArchived ? '暂无归档会话' : '暂无会话' }}
           </div>
         </div>
       </div>
@@ -147,6 +149,45 @@
         </div>
       </Transition>
     </div>
+
+    <!-- 会话右键菜单 -->
+    <Teleport to="body">
+      <Transition name="menu-fade">
+        <div
+          v-if="contextMenu"
+          class="context-menu"
+          :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+          @click.stop
+        >
+          <div class="context-menu-item" @click="startRename(contextMenu.session)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+            <span>重命名</span>
+          </div>
+          <div class="context-menu-item" @click="togglePin(contextMenu.session)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14l-1.5-3V2h-11v12z"/>
+            </svg>
+            <span>{{ contextMenu.session.is_pinned ? '取消置顶' : '置顶' }}</span>
+          </div>
+          <div class="context-menu-item" @click="toggleArchive(contextMenu.session)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="4" width="20" height="5" rx="1"/><path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9"/><line x1="10" y1="13" x2="14" y2="13"/>
+            </svg>
+            <span>{{ contextMenu.session.is_archived ? '取消归档' : '归档' }}</span>
+          </div>
+          <div class="context-menu-divider"></div>
+          <div class="context-menu-item danger" @click="deleteSession(contextMenu.session)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+            <span>删除</span>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- 重命名弹窗 -->
     <Transition name="dialog-fade">
@@ -234,7 +275,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, reactive, defineExpose } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, reactive, defineExpose, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { workspaceApi, agentApi } from '@/api/aegis'
@@ -256,11 +297,15 @@ interface Session {
   title: string | null
   status: string
   workspace_id: number | null
+  is_pinned: boolean
+  is_archived: boolean
 }
 
 const props = defineProps<{
   currentProjectId: number | null
   currentSessionId?: number | null
+  /** ChatArea 实时运行状态（用于轮询启动防死锁：正在流式渲染时必然有运行中任务） */
+  activeRunStatus?: string
 }>()
 const emit = defineEmits<{
   selectProject: [number]
@@ -277,6 +322,12 @@ const searchQuery = ref('')
 const sessionsMap = reactive<Record<number, Session[]>>({})
 const sessionsLoading = reactive<Record<number, boolean>>({})
 const expandedMap = reactive<Record<number, boolean>>({})
+
+// 归档切换：showArchived=true 时显示已归档会话
+const showArchived = ref(false)
+
+// 右键菜单
+const contextMenu = ref<{ x: number; y: number; session: Session } | null>(null)
 function isExpanded(pid: number): boolean {
   return !!expandedMap[pid]
 }
@@ -324,10 +375,13 @@ function statusLabelOf(status: string): string {
   return map[status] || ''
 }
 
-// 点击外部关闭用户菜单
+// 点击外部关闭用户菜单 + 右键菜单
 function onUserMenuOutside(e: MouseEvent) {
   if (showUserMenu.value && !(e.target as HTMLElement).closest('.sidebar-user')) {
     showUserMenu.value = false
+  }
+  if (contextMenu.value && !(e.target as HTMLElement).closest('.context-menu')) {
+    closeContextMenu()
   }
 }
 
@@ -358,7 +412,19 @@ const filteredProjects = computed(() => {
 })
 
 function sessionsOf(projectId: number): Session[] {
-  return sessionsMap[projectId] || []
+  const all = sessionsMap[projectId] || []
+  // 按归档状态过滤
+  const filtered = all.filter((s) => s.is_archived === showArchived.value)
+  // 置顶排在最前，其余按 id 倒序
+  return filtered.sort((a, b) => {
+    if (a.is_pinned && !b.is_pinned) return -1
+    if (!a.is_pinned && b.is_pinned) return 1
+    return b.id - a.id
+  })
+}
+
+function hasArchived(projectId: number): boolean {
+  return (sessionsMap[projectId] || []).some((s) => s.is_archived)
 }
 
 // ── 暴露给父组件 ──
@@ -390,7 +456,8 @@ async function loadProjects() {
 async function refreshSessions(projectId: number, autoExpand = false) {
   sessionsLoading[projectId] = true
   try {
-    const res: any = await agentApi.listRuns({ workspace_id: projectId, page: 1, page_size: 50 })
+    // 拉取全部会话（含归档），前端按 showArchived 过滤
+    const res: any = await agentApi.listRuns({ workspace_id: projectId, page: 1, page_size: 50, include_archived: true })
     sessionsMap[projectId] = res.items || []
     if (autoExpand && sessionsMap[projectId].length > 0) {
       setExpanded(projectId, true)
@@ -435,10 +502,21 @@ async function createSession(projectId: number) {
   emit('createSession', projectId)
 }
 
+// ── 右键菜单 ──
+function onSessionContextMenu(e: MouseEvent, session: Session) {
+  e.preventDefault()
+  contextMenu.value = { x: e.clientX, y: e.clientY, session }
+}
+
+function closeContextMenu() {
+  contextMenu.value = null
+}
+
 // ── 重命名 ──
 function startRename(session: Session) {
   renamingSession.value = session
   renameText.value = session.title || `会话 #${session.id}`
+  closeContextMenu()
 }
 
 async function confirmRename() {
@@ -456,6 +534,7 @@ async function confirmRename() {
 
 // ── 删除会话 ──
 async function deleteSession(session: Session) {
+  closeContextMenu()
   try {
     await ElMessageBox.confirm(
       `确定删除会话「${session.title || `#${session.id}`}」？删除后不可恢复。`,
@@ -477,6 +556,38 @@ async function deleteSession(session: Session) {
     }
   } catch (e: any) {
     ElMessage.error(e.message || '删除失败')
+  }
+}
+
+// ── 置顶/取消置顶 ──
+async function togglePin(session: Session) {
+  closeContextMenu()
+  try {
+    await agentApi.pinRun(session.id, !session.is_pinned)
+    ElMessage.success(!session.is_pinned ? '已置顶' : '已取消置顶')
+    const pid = session.workspace_id
+    if (pid) await refreshSessions(pid)
+  } catch (e: any) {
+    ElMessage.error(e.message || '操作失败')
+  }
+}
+
+// ── 归档/取消归档 ──
+async function toggleArchive(session: Session) {
+  closeContextMenu()
+  try {
+    await agentApi.archiveRun(session.id, !session.is_archived)
+    ElMessage.success(!session.is_archived ? '已归档' : '已取消归档')
+    const pid = session.workspace_id
+    if (pid) {
+      await refreshSessions(pid)
+      // 如果当前选中的会话被归档，跳回项目首页
+      if (session.is_archived === false && props.currentSessionId === session.id) {
+        emit('selectProject', pid)
+      }
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message || '操作失败')
   }
 }
 
@@ -513,12 +624,46 @@ function pickLocalFolder() {
   ElMessage.info('本地文件夹选择需要桌面端支持，请使用 PC 客户端')
 }
 
+// ── 会话状态轮询（运行中标识实时刷新） ──
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+// ChatArea 实时状态变化时：立即更新当前会话在侧栏的状态标签（不等 5s 轮询）
+watch(() => props.activeRunStatus, (newStatus) => {
+  if (!newStatus || !props.currentProjectId || !props.currentSessionId) return
+  const list = sessionsMap[props.currentProjectId]
+  if (!Array.isArray(list)) return
+  const s = list.find((x: any) => x.id === props.currentSessionId)
+  if (s && s.status !== newStatus) {
+    s.status = newStatus
+  }
+})
+
 onMounted(() => {
   loadProjects()
+  // 确保用户信息已拉取（工作台独立入口时可能未预加载）
+  if (!userStore.username) {
+    userStore.fetchUserInfo().catch(() => { /* 401 由拦截器处理 */ })
+  }
   document.addEventListener('click', onUserMenuOutside)
+  // 存在运行中会话时每 5s 静默刷新侧栏状态标签（后台任务完成/异常自动更新）
+  pollTimer = setInterval(async () => {
+    // 由 index.vue 同步的 ChatArea 实时状态：正在流式渲染时必然有运行中任务（防轮询死锁）
+    const chatRunning = props.activeRunStatus === 'running'
+    const hasRunning = chatRunning || Object.values(sessionsMap).some(
+      (list) => Array.isArray(list) && list.some((s: any) => s.status === 'running' || s.status === 'paused'),
+    )
+    if (!hasRunning) return
+    for (const pid of Object.keys(sessionsMap).map(Number)) {
+      try {
+        const res: any = await agentApi.listRuns({ workspace_id: pid, page: 1, page_size: 50, include_archived: true })
+        if (res.items) sessionsMap[pid] = res.items
+      } catch { /* 忽略轮询失败 */ }
+    }
+  }, 5000)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('click', onUserMenuOutside)
+  if (pollTimer) clearInterval(pollTimer)
 })
 </script>
 
@@ -732,6 +877,20 @@ onBeforeUnmount(() => {
 .session-item.active .session-icon {
   color: var(--el-color-primary, #4f46e5);
 }
+/* 置顶会话 */
+.session-item.pinned {
+  background: #fafbff;
+}
+.session-item.pinned .session-title {
+  font-weight: 600;
+}
+.pin-icon {
+  flex-shrink: 0;
+  color: var(--el-color-primary, #4f46e5);
+}
+.session-item.active .pin-icon {
+  color: var(--el-color-primary, #4f46e5);
+}
 .session-title {
   flex: 1;
   min-width: 0;
@@ -753,6 +912,21 @@ onBeforeUnmount(() => {
 .session-status-tag.running {
   background: #dbeafe;
   color: #2563eb;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.session-status-tag.running::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2563eb;
+  animation: status-blink 1.2s ease-in-out infinite;
+}
+@keyframes status-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
 }
 .session-status-tag.paused {
   background: #fef3c7;
@@ -770,33 +944,43 @@ onBeforeUnmount(() => {
   background: #f3f4f6;
   color: #6b7280;
 }
-.session-actions {
+
+/* 更多操作按钮（三点） */
+.session-more-btn {
   flex-shrink: 0;
   display: none;
-  gap: 2px;
-}
-.session-item:hover .session-actions {
-  display: flex;
-}
-.session-action-btn {
-  width: 20px;
-  height: 20px;
-  display: flex;
   align-items: center;
   justify-content: center;
+  width: 20px;
+  height: 20px;
   border-radius: 4px;
-  border: none;
-  background: transparent;
   color: var(--theme-text-secondary, #9ca3af);
   cursor: pointer;
 }
-.session-action-btn:hover {
-  background: var(--theme-hover-bg, #e5e7eb);
-  color: var(--theme-text-color, #1f2937);
+.session-item:hover .session-more-btn {
+  display: flex;
 }
-.session-action-btn.danger:hover {
-  background: #fee2e2;
-  color: #dc2626;
+.session-more-btn:hover {
+  background: var(--theme-hover-bg, #e5e7eb);
+  color: var(--theme-text-color, #374151);
+}
+
+/* 归档切换 */
+.archive-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--theme-text-secondary, #9ca3af);
+  font-size: 11.5px;
+  transition: all 0.15s;
+}
+.archive-toggle:hover {
+  color: var(--el-color-primary, #4f46e5);
+  background: var(--el-color-primary-light-9, #eef2ff);
 }
 
 /* 组底部新建会话 */
@@ -987,7 +1171,7 @@ onBeforeUnmount(() => {
   background: #fef2f2;
 }
 
-/* 用户菜单动画 */
+/* ── 用户菜单动画 ── */
 .menu-fade-enter-active,
 .menu-fade-leave-active {
   transition: opacity 0.15s, transform 0.15s;
@@ -996,6 +1180,43 @@ onBeforeUnmount(() => {
 .menu-fade-leave-to {
   opacity: 0;
   transform: translateY(4px);
+}
+
+/* ── 会话右键菜单 ── */
+.context-menu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 160px;
+  background: var(--theme-card-bg, #fff);
+  border: 1px solid var(--theme-border-color, #e5e7eb);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.15);
+  padding: 4px;
+}
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--theme-text-color, #374151);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.context-menu-item:hover {
+  background: var(--theme-hover-bg, #f3f4f6);
+}
+.context-menu-item.danger {
+  color: #dc2626;
+}
+.context-menu-item.danger:hover {
+  background: #fef2f2;
+}
+.context-menu-divider {
+  height: 1px;
+  background: var(--theme-border-color, #f0f0f0);
+  margin: 4px 0;
 }
 
 /* ── 弹窗 ── */

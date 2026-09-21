@@ -270,6 +270,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   runStatusChange: [string]
   sessionCreated: [sessionId: number]
+  streamingChange: [streaming: boolean]
 }>()
 
 // ── 状态 ──
@@ -373,13 +374,18 @@ function toggleSkill(sk: SkillOption) {
 }
 
 // ── 初始化：按外部指定的会话恢复（含历史），否则新建 ──
+let loadedSessionId: number | null = null
 async function loadSession(sessionId: number | null) {
+  loadedSessionId = sessionId
+  // 切换会话前先停掉旧 SSE 流（后台任务继续跑，仅停止本组件渲染），防止事件串台
+  abortCurrentStream()
   // 重置会话状态
   messages.value = []
   runId.value = null
   runInfo.value = null
   status.value = 'idle'
   streamContent.value = ''
+  streamReasoning.value = ''
   streaming.value = false
 
   if (!sessionId) return
@@ -390,13 +396,70 @@ async function loadSession(sessionId: number | null) {
       runInfo.value = res
       status.value = res.status || 'idle'
       emit('runStatusChange', status.value)
-      if (res.status === 'running' || res.status === 'paused') {
-        emit('runStatusChange', res.status)
-      }
       await loadHistory()
+      // 后台运行中的会话：续接 SSE 事件流（切回不中断）
+      if (res.status === 'running') {
+        await resumeRunningStream()
+      }
     }
   } catch {
     // 会话可能已被删除，忽略
+  }
+}
+
+// ── SSE 消费的中止控制（切换会话时停掉旧流，防止事件串台） ──
+let sseAbort: AbortController | null = null
+
+function abortCurrentStream() {
+  if (sseAbort) {
+    sseAbort.abort()
+    sseAbort = null
+  }
+}
+
+// ── 续接运行中的会话流（切回会话时） ──
+async function resumeRunningStream() {
+  if (!runId.value || streaming.value) return
+  streaming.value = true
+  abortCurrentStream()
+  const controller = new AbortController()
+  sseAbort = controller
+  let abortedBySwitch = false
+  try {
+    const response = await fetch(`/api/v1/aegis-agent/runs/${runId.value}/subscribe`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('apeadmin_token') || ''}`,
+      },
+      signal: controller.signal,
+    })
+    if (!response.ok) {
+      // 会话不在运行中（刚完成），拉最新历史即可
+      status.value = 'completed'
+      emit('runStatusChange', 'completed')
+      await loadHistory()
+      streaming.value = false
+      emit('streamingChange', false)
+      return
+    }
+    // 订阅只能收到未来事件：以订阅期间收到的实时内容渲染，
+    // 结束后以 DB 历史对齐（错过的事件、done 完整内容都覆盖）
+    await consumeSSE(response, controller.signal, controller)
+  } catch (e: any) {
+    if (e.name === 'AbortError') {
+      abortedBySwitch = true
+    } else {
+      console.error('resume stream failed:', e)
+    }
+  } finally {
+    if (sseAbort === controller) sseAbort = null
+    streaming.value = false
+    // 被切换会话中断时：本组件已切到新会话，不再对旧流做任何渲染
+    if (abortedBySwitch) return
+    // 以 DB 为真相源对齐最终状态
+    if (runId.value) await loadHistory()
+    emit('streamingChange', false)
   }
 }
 
@@ -405,9 +468,9 @@ onMounted(() => {
   loadModelOptions()
 })
 
-// 外部切换会话时重新加载
+// 外部切换会话时重新加载（ChatArea 不再销毁重建，靠 watch 驱动）
 watch(() => props.sessionId ?? null, (newId) => {
-  if (newId !== runId.value) {
+  if (newId !== loadedSessionId) {
     loadSession(newId)
   }
 })
@@ -423,7 +486,11 @@ function onClickOutside(e: MouseEvent) {
   }
 }
 onMounted(() => document.addEventListener('click', onClickOutside))
-onBeforeUnmount(() => document.removeEventListener('click', onClickOutside))
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onClickOutside)
+  // 组件卸载时停止 SSE 读取（后端后台任务不受影响，切回/重进页面可续接）
+  abortCurrentStream()
+})
 
 // ── 加载历史消息 ──
 async function loadHistory() {
@@ -461,6 +528,7 @@ async function sendMessage(presetText?: string) {
 
   inputText.value = ''
   resetInputHeight()
+  emit('streamingChange', true)
 
   // 技能激活时拼接技能 prompt 前缀
   let finalText = text
@@ -481,6 +549,7 @@ async function sendMessage(presetText?: string) {
         ...(selectedModel.value && selectedModel.value !== 'auto' ? { model_name: selectedModel.value } : {}),
       })
       runId.value = res.id
+      loadedSessionId = res.id  // 新建会话：标记已加载，避免 props.sessionId 同步后触发重复 loadSession
       status.value = res.status || 'running'
       runInfo.value = { model_name: selectedModel.value }
       emit('runStatusChange', 'running')
@@ -492,24 +561,64 @@ async function sendMessage(presetText?: string) {
     }
   }
 
-  // SSE 流式发送
+  // SSE 流式发送（后台任务执行，本组件仅订阅事件流）
   streaming.value = true
   streamContent.value = ''
   streamReasoning.value = ''
   streamReasoningDone.value = false
+  abortCurrentStream()
+  const controller = new AbortController()
+  sseAbort = controller
+  let abortedBySwitch = false
 
   try {
-    const response = await agentApi.sendMessage(runId.value!, finalText, true) as Response
+    const response = await agentApi.sendMessage(runId.value!, finalText, true, controller.signal) as Response
     if (!response.ok) {
       const errText = await response.text()
       throw new Error(`HTTP ${response.status}: ${errText}`)
     }
+    await consumeSSE(response, controller.signal, controller)
+  } catch (e: any) {
+    if (e.name === 'AbortError') {
+      // 被切换会话中断：后台任务继续，本组件不再渲染
+      abortedBySwitch = true
+    } else {
+      ElMessage.error('通信失败: ' + (e.message || ''))
+      messages.value.push({
+        role: 'assistant',
+        content: `⚠ 通信错误: ${e.message}`,
+      })
+      // 后台任务可能仍在运行，重新拉取最新状态
+      try {
+        const st: any = await agentApi.getRunStatus(runId.value!)
+        if (st && st.status) {
+          status.value = st.status
+          emit('runStatusChange', st.status)
+        }
+      } catch { /* 忽略 */ }
+    }
+  } finally {
+    if (sseAbort === controller) sseAbort = null
+    // 被切换中断时跳过 finishStream，防止旧会话残留内容混入新会话
+    if (!abortedBySwitch) await finishStream()
+  }
+}
 
-    const reader = response.body!.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
+// ── 消费 SSE 响应（send 与 resume 共用；controller 用于代际检查防串台） ──
+async function consumeSSE(response: Response, signal?: AbortSignal, controller?: AbortController) {
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
 
+  // 流已不再是当前流（会话已被切换）：丢弃事件，仅停止读取
+  const isStale = () => !!controller && sseAbort !== controller
+
+  try {
     while (true) {
+      if (signal?.aborted || isStale()) {
+        await reader.cancel()
+        return
+      }
       const { done, value } = await reader.read()
       if (done) break
 
@@ -524,6 +633,11 @@ async function sendMessage(presetText?: string) {
 
         try {
           const event = JSON.parse(dataStr)
+          // 事件处理前的代际检查：旧流的事件一律丢弃，防止串台写入新会话
+          if (isStale()) {
+            await reader.cancel()
+            return
+          }
           await handleSSEEvent(event)
         } catch {
           // 忽略无法解析的事件
@@ -532,7 +646,7 @@ async function sendMessage(presetText?: string) {
     }
 
     // 处理 buffer 中剩余的数据
-    if (buffer.startsWith('data: ')) {
+    if (buffer.startsWith('data: ') && !isStale()) {
       try {
         const event = JSON.parse(buffer.slice(6).trim())
         await handleSSEEvent(event)
@@ -541,25 +655,25 @@ async function sendMessage(presetText?: string) {
       }
     }
   } catch (e: any) {
-    ElMessage.error('通信失败: ' + (e.message || ''))
+    if (e.name === 'AbortError') return
+    throw e
+  }
+}
+
+// ── 流结束：合并 streamContent 到消息列表 ──
+async function finishStream() {
+  if (streamContent.value || streamReasoning.value) {
     messages.value.push({
       role: 'assistant',
-      content: `⚠ 通信错误: ${e.message}`,
+      content: streamContent.value,
+      reasoning_content: streamReasoning.value || undefined,
     })
-  } finally {
-    // 流式结束，将 streamContent 合并到消息列表
-    if (streamContent.value || streamReasoning.value) {
-      messages.value.push({
-        role: 'assistant',
-        content: streamContent.value,
-        reasoning_content: streamReasoning.value || undefined,
-      })
-    }
-    streamContent.value = ''
-    streamReasoning.value = ''
-    streaming.value = false
-    await scrollToBottom()
   }
+  streamContent.value = ''
+  streamReasoning.value = ''
+  streaming.value = false
+  emit('streamingChange', false)
+  await scrollToBottom()
 }
 
 // ── 处理 SSE 事件 ──
