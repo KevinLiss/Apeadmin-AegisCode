@@ -46,6 +46,7 @@ class RunCreate(BaseModel):
     workspace_id: int | None = Field(default=None, description="关联工作区ID")
     provider_id: int | None = Field(default=None, description="AI Provider ID（留空自动选第一个启用的）")
     model_name: str | None = Field(default=None, description="模型名（留空用 provider 默认）")
+    title: str | None = Field(default=None, max_length=100, description="会话标题（留空首条消息自动生成）")
     max_tokens: int = Field(default=200000, ge=1000, le=10_000_000, description="Token 预算")
     max_steps: int = Field(default=50, ge=1, le=500, description="最大步数")
     max_cost_usd: Decimal | None = Field(default=None, description="成本上限(USD)")
@@ -64,6 +65,11 @@ class RunControl(BaseModel):
     action: str = Field(..., pattern="^(pause|resume|cancel)$", description="控制动作")
 
 
+class RunRename(BaseModel):
+    """重命名会话。"""
+    title: str = Field(..., min_length=1, max_length=100, description="新标题")
+
+
 # ---------------------------------------------------------------------------
 # 响应模型
 # ---------------------------------------------------------------------------
@@ -74,6 +80,7 @@ class RunOut(BaseModel):
     id: int
     user_id: int
     workspace_id: int | None = None
+    title: str | None = None
     status: str
     model_name: str | None = None
     max_tokens: int

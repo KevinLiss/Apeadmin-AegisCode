@@ -1,42 +1,103 @@
 <template>
   <aside class="project-sidebar">
+    <!-- 新建项目按钮 -->
+    <div class="sidebar-top">
+      <button class="new-project-btn" @click="showCreateDialog = true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        <span>新建项目</span>
+      </button>
+    </div>
+
     <!-- 搜索栏 -->
     <div class="sidebar-search">
+      <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
       <input
         v-model="searchQuery"
-        placeholder="搜索项目..."
+        placeholder="搜索对话历史..."
         class="search-input"
       />
     </div>
 
-    <!-- 新建项目按钮 -->
-    <button class="new-project-btn" @click="showCreateDialog = true">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-      </svg>
-      <span>新建项目</span>
-    </button>
-
-    <!-- 项目列表 -->
+    <!-- 项目→会话 两级列表 -->
     <div class="project-list">
       <div
         v-for="project in filteredProjects"
         :key="project.id"
-        class="project-item"
-        :class="{ active: project.id === currentProjectId }"
-        @click="$emit('selectProject', project.id)"
+        class="project-group"
       >
-        <div class="project-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        <!-- 项目行 -->
+        <div
+          class="project-item"
+          :class="{ active: project.id === currentProjectId }"
+          @click="onProjectClick(project)"
+        >
+          <svg
+            class="expand-arrow"
+            :class="{ expanded: isExpanded(project.id) }"
+            width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+            @click.stop="toggleExpand(project.id)"
+          >
+            <polyline points="9 18 15 12 9 6"/>
           </svg>
+          <div class="project-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+          </div>
+          <div class="project-info">
+            <div class="project-name">{{ project.name }}</div>
+          </div>
+          <!-- 新建会话按钮 -->
+          <button class="new-session-btn" title="新建会话" @click.stop="createSession(project.id)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+          </button>
         </div>
-        <div class="project-info">
-          <div class="project-name">{{ project.name }}</div>
-          <div class="project-path">
-            <span v-if="project.storage_type === 'cloud'" class="storage-tag cloud">云端</span>
-            <span v-else class="storage-tag local">本地</span>
-            {{ project.root_hint || project.root_path || '-' }}
+
+        <!-- 会话列表 -->
+        <div v-if="isExpanded(project.id)" class="session-list">
+          <div
+            v-for="session in sessionsOf(project.id)"
+            :key="session.id"
+            class="session-item"
+            :class="{ active: currentSessionId === session.id && project.id === currentProjectId }"
+            @click="onSessionClick(project.id, session.id)"
+          >
+            <svg class="session-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            <span class="session-title">{{ session.title || `会话 #${session.id}` }}</span>
+            <span class="session-status" :class="session.status" v-if="session.status === 'running'"></span>
+            <span class="session-actions" @click.stop>
+              <button class="session-action-btn" title="重命名" @click="startRename(session)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+              </button>
+              <button class="session-action-btn danger" title="删除会话" @click="deleteSession(session)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+              </button>
+            </span>
+          </div>
+
+          <!-- 新建会话入口（每组底部） -->
+          <div class="new-session-row" @click="createSession(project.id)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            <span>新建会话</span>
+          </div>
+
+          <div v-if="!sessionsLoading[project.id] && sessionsOf(project.id).length === 0" class="session-empty">
+            暂无会话
           </div>
         </div>
       </div>
@@ -48,6 +109,22 @@
 
       <div v-if="loading" class="loading-state">加载中...</div>
     </div>
+
+    <!-- 重命名弹窗 -->
+    <Transition name="dialog-fade">
+      <div v-if="renamingSession" class="dialog-overlay" @click.self="renamingSession = null">
+        <div class="dialog mini">
+          <h3 class="dialog-title">重命名会话</h3>
+          <div class="dialog-body">
+            <input v-model="renameText" class="form-input" placeholder="会话标题" @keydown.enter="confirmRename" />
+          </div>
+          <div class="dialog-footer">
+            <button class="btn btn-cancel" @click="renamingSession = null">取消</button>
+            <button class="btn btn-primary" @click="confirmRename">保存</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
 
     <!-- 新建项目弹窗 -->
     <Transition name="dialog-fade">
@@ -119,9 +196,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, defineExpose } from 'vue'
-import { ElMessage } from 'element-plus'
-import { workspaceApi } from '@/api/aegis'
+import { ref, computed, onMounted, reactive, defineExpose } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { workspaceApi, agentApi } from '@/api/aegis'
 
 interface Project {
   id: number
@@ -134,13 +211,38 @@ interface Project {
   status: string
 }
 
-const props = defineProps<{ currentProjectId: number | null }>()
-const emit = defineEmits<{ selectProject: [number] }>()
+interface Session {
+  id: number
+  title: string | null
+  status: string
+  workspace_id: number | null
+}
+
+const props = defineProps<{
+  currentProjectId: number | null
+  currentSessionId?: number | null
+}>()
+const emit = defineEmits<{
+  selectProject: [number]
+  selectSession: [projectId: number, sessionId: number]
+  createSession: [projectId: number]
+}>()
 
 // ── 数据 ──
 const projects = ref<Project[]>([])
 const loading = ref(false)
 const searchQuery = ref('')
+
+// 会话缓存: projectId -> sessions[]
+const sessionsMap = reactive<Record<number, Session[]>>({})
+const sessionsLoading = reactive<Record<number, boolean>>({})
+const expandedMap = reactive<Record<number, boolean>>({})
+function isExpanded(pid: number): boolean {
+  return !!expandedMap[pid]
+}
+function setExpanded(pid: number, val: boolean) {
+  expandedMap[pid] = val
+}
 
 // ── 桌面端检测 (预留, 当前 Web 端固定 false) ──
 const isDesktop = ref(false)
@@ -156,20 +258,35 @@ const newProject = ref({
   git_enabled: true,
 })
 
-// ── 过滤 ──
+// ── 重命名 ──
+const renamingSession = ref<Session | null>(null)
+const renameText = ref('')
+
+// ── 过滤（项目名 + 会话标题） ──
 const filteredProjects = computed(() => {
   if (!searchQuery.value) return projects.value
   const q = searchQuery.value.toLowerCase()
-  return projects.value.filter(
-    (p) => p.name.toLowerCase().includes(q) || p.root_path.toLowerCase().includes(q),
-  )
+  return projects.value.filter((p) => {
+    if (p.name.toLowerCase().includes(q)) return true
+    const sessions = sessionsMap[p.id] || []
+    return sessions.some((s) => (s.title || '').toLowerCase().includes(q))
+  })
 })
+
+function sessionsOf(projectId: number): Session[] {
+  return sessionsMap[projectId] || []
+}
 
 // ── 暴露给父组件 ──
 function getProject(id: number): Project | null {
   return projects.value.find((p) => p.id === id) ?? null
 }
-defineExpose({ getProject, loadProjects })
+defineExpose({
+  getProject,
+  loadProjects,
+  refreshSessions,
+  ensureSessionVisible,
+})
 
 // ── 加载项目列表 ──
 async function loadProjects() {
@@ -185,6 +302,100 @@ async function loadProjects() {
   }
 }
 
+// ── 加载项目下的会话 ──
+async function refreshSessions(projectId: number, autoExpand = false) {
+  sessionsLoading[projectId] = true
+  try {
+    const res: any = await agentApi.listRuns({ workspace_id: projectId, page: 1, page_size: 50 })
+    sessionsMap[projectId] = res.items || []
+    if (autoExpand && sessionsMap[projectId].length > 0) {
+      setExpanded(projectId, true)
+    }
+  } catch (e: any) {
+    console.error(e)
+  } finally {
+    sessionsLoading[projectId] = false
+  }
+}
+
+// 新会话创建后让侧栏立即显示
+async function ensureSessionVisible(projectId: number, sessionId: number) {
+  setExpanded(projectId, true)
+  await refreshSessions(projectId)
+  const s = (sessionsMap[projectId] || []).find((x) => x.id === sessionId)
+  if (s) emit('selectSession', projectId, sessionId)
+}
+
+// ── 交互 ──
+function toggleExpand(projectId: number) {
+  const next = !isExpanded(projectId)
+  setExpanded(projectId, next)
+  if (next && !sessionsMap[projectId] && !sessionsLoading[projectId]) {
+    refreshSessions(projectId)
+  }
+}
+
+function onProjectClick(project: Project) {
+  toggleExpand(project.id)
+  if (project.id !== props.currentProjectId) {
+    emit('selectProject', project.id)
+  }
+}
+
+function onSessionClick(projectId: number, sessionId: number) {
+  emit('selectSession', projectId, sessionId)
+}
+
+async function createSession(projectId: number) {
+  setExpanded(projectId, true)
+  emit('createSession', projectId)
+}
+
+// ── 重命名 ──
+function startRename(session: Session) {
+  renamingSession.value = session
+  renameText.value = session.title || `会话 #${session.id}`
+}
+
+async function confirmRename() {
+  if (!renamingSession.value || !renameText.value.trim()) return
+  try {
+    await agentApi.renameRun(renamingSession.value.id, renameText.value.trim())
+    ElMessage.success('已重命名')
+    const pid = renamingSession.value.workspace_id
+    renamingSession.value = null
+    if (pid) await refreshSessions(pid)
+  } catch (e: any) {
+    ElMessage.error(e.message || '重命名失败')
+  }
+}
+
+// ── 删除会话 ──
+async function deleteSession(session: Session) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除会话「${session.title || `#${session.id}`}」？删除后不可恢复。`,
+      '删除会话',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  try {
+    await agentApi.deleteRun(session.id)
+    ElMessage.success('会话已删除')
+    const pid = session.workspace_id
+    if (pid) {
+      await refreshSessions(pid)
+      if (props.currentSessionId === session.id) {
+        emit('selectProject', pid)
+      }
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message || '删除失败')
+  }
+}
+
 // ── 创建项目 ──
 async function handleCreate() {
   creating.value = true
@@ -196,10 +407,8 @@ async function handleCreate() {
       git_enabled: newProject.value.git_enabled,
     }
 
-    // 本地模式: 桌面端附加路径信息
     if (isDesktop.value && newProject.value.storage_type === 'local' && newProject.value.root_hint) {
       payload.root_hint = newProject.value.root_hint
-      // TODO: 桌面端后续补充 device_id / device_name 等
     }
 
     const res: any = await workspaceApi.createProject(payload)
@@ -207,7 +416,6 @@ async function handleCreate() {
     showCreateDialog.value = false
     newProject.value = { name: '', description: '', storage_type: 'cloud', root_hint: '', git_enabled: true }
     await loadProjects()
-    // 自动选中新建的项目
     if (res.id) emit('selectProject', res.id)
   } catch (e: any) {
     ElMessage.error(e.message || '创建失败')
@@ -218,7 +426,6 @@ async function handleCreate() {
 
 // ── 本地文件夹选择 (桌面端预留) ──
 function pickLocalFolder() {
-  // TODO: 桌面端通过 Electron IPC 调用 dialog:openDir
   ElMessage.info('本地文件夹选择需要桌面端支持，请使用 PC 客户端')
 }
 
@@ -229,7 +436,7 @@ onMounted(() => {
 
 <style scoped>
 .project-sidebar {
-  width: 260px;
+  width: 264px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -238,14 +445,47 @@ onMounted(() => {
   overflow: hidden;
 }
 
+/* 新建按钮（放顶部，蓝色主按钮风格） */
+.sidebar-top {
+  padding: 12px 12px 4px;
+}
+.new-project-btn {
+  width: 100%;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 8px;
+  border: none;
+  background: var(--el-color-primary, #4f46e5);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.new-project-btn:hover {
+  opacity: 0.9;
+}
+
 /* 搜索 */
 .sidebar-search {
-  padding: 12px;
+  padding: 8px 12px 10px;
+  position: relative;
+}
+.search-icon {
+  position: absolute;
+  left: 22px;
+  top: 50%;
+  transform: translateY(-60%);
+  color: var(--theme-text-secondary, #9ca3af);
+  pointer-events: none;
 }
 .search-input {
   width: 100%;
-  height: 34px;
-  padding: 0 12px;
+  height: 32px;
+  padding: 0 12px 0 32px;
   border-radius: 8px;
   border: 1px solid var(--theme-border-color, #e5e7eb);
   background: var(--theme-body-bg, #f9fafb);
@@ -261,27 +501,194 @@ onMounted(() => {
   color: var(--theme-text-secondary, #9ca3af);
 }
 
-/* 新建按钮 */
-.new-project-btn {
-  margin: 0 12px 8px;
-  height: 36px;
+/* 项目列表 */
+.project-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px 12px;
+}
+
+.project-group {
+  margin-bottom: 2px;
+}
+
+.project-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-bottom: 2px;
+}
+.project-item:hover {
+  background: var(--theme-hover-bg, #f3f4f6);
+}
+.project-item.active {
+  background: var(--el-color-primary-light-9, #eef2ff);
+}
+.project-item.active .project-name {
+  color: var(--el-color-primary, #4f46e5);
+}
+.project-item.active .project-icon {
+  color: var(--el-color-primary, #4f46e5);
+}
+
+.expand-arrow {
+  flex-shrink: 0;
+  color: var(--theme-text-secondary, #9ca3af);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.expand-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+.project-icon {
+  flex-shrink: 0;
+  color: var(--theme-text-secondary, #9ca3af);
+}
+.project-info {
+  flex: 1;
+  min-width: 0;
+}
+.project-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--theme-text-color, #1f2937);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 项目行上的新建会话按钮 */
+.new-session-btn {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  border-radius: 8px;
-  border: 1px dashed var(--theme-border-color, #e5e7eb);
+  border-radius: 6px;
+  border: none;
   background: transparent;
-  color: var(--theme-text-secondary, #6b7280);
-  font-size: 13px;
-  font-weight: 500;
+  color: var(--theme-text-secondary, #9ca3af);
   cursor: pointer;
-  transition: all 0.2s;
+  opacity: 0;
+  transition: all 0.15s;
 }
-.new-project-btn:hover {
-  border-color: var(--el-color-primary, #4f46e5);
+.project-item:hover .new-session-btn {
+  opacity: 1;
+}
+.new-session-btn:hover {
+  background: var(--el-color-primary-light-9, #eef2ff);
+  color: var(--el-color-primary, #4f46e5);
+}
+
+/* 会话列表 */
+.session-list {
+  margin: 0 0 4px 14px;
+  padding-left: 10px;
+  border-left: 1px solid var(--theme-border-color, #eceef2);
+}
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.session-item:hover {
+  background: var(--theme-hover-bg, #f3f4f6);
+}
+.session-item.active {
+  background: var(--el-color-primary-light-9, #eef2ff);
+}
+.session-item.active .session-title {
+  color: var(--el-color-primary, #4f46e5);
+  font-weight: 500;
+}
+.session-icon {
+  flex-shrink: 0;
+  color: var(--theme-text-secondary, #b6bcc8);
+}
+.session-item.active .session-icon {
+  color: var(--el-color-primary, #4f46e5);
+}
+.session-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--theme-text-color, #4b5563);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-status {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.session-actions {
+  flex-shrink: 0;
+  display: none;
+  gap: 2px;
+}
+.session-item:hover .session-actions {
+  display: flex;
+}
+.session-action-btn {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--theme-text-secondary, #9ca3af);
+  cursor: pointer;
+}
+.session-action-btn:hover {
+  background: var(--theme-hover-bg, #e5e7eb);
+  color: var(--theme-text-color, #1f2937);
+}
+.session-action-btn.danger:hover {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+/* 组底部新建会话 */
+.new-session-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--theme-text-secondary, #9ca3af);
+  font-size: 12.5px;
+  transition: all 0.15s;
+}
+.new-session-row:hover {
   color: var(--el-color-primary, #4f46e5);
   background: var(--el-color-primary-light-9, #eef2ff);
+}
+
+.session-empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--theme-text-secondary, #c0c6d0);
 }
 
 /* 存储方式选择 */
@@ -348,77 +755,6 @@ onMounted(() => {
   background: var(--theme-hover-bg, #f3f4f6);
 }
 
-/* 存储标签 */
-.storage-tag {
-  display: inline-block;
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  margin-right: 4px;
-  font-weight: 500;
-}
-.storage-tag.cloud {
-  background: #dbeafe;
-  color: #2563eb;
-}
-.storage-tag.local {
-  background: #fef3c7;
-  color: #d97706;
-}
-
-/* 项目列表 */
-.project-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 8px 12px;
-}
-.project-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.15s;
-  margin-bottom: 2px;
-}
-.project-item:hover {
-  background: var(--theme-hover-bg, #f3f4f6);
-}
-.project-item.active {
-  background: var(--el-color-primary-light-9, #eef2ff);
-}
-.project-item.active .project-icon {
-  color: var(--el-color-primary, #4f46e5);
-}
-.project-icon {
-  flex-shrink: 0;
-  color: var(--theme-text-secondary, #9ca3af);
-}
-.project-info {
-  flex: 1;
-  min-width: 0;
-}
-.project-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--theme-text-color, #1f2937);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.project-item.active .project-name {
-  color: var(--el-color-primary, #4f46e5);
-}
-.project-path {
-  font-size: 11px;
-  color: var(--theme-text-secondary, #9ca3af);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-top: 2px;
-}
-
 /* 空状态 / 加载 */
 .empty-state,
 .loading-state {
@@ -447,6 +783,9 @@ onMounted(() => {
   background: var(--theme-card-bg, #fff);
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+.dialog.mini {
+  width: 360px;
 }
 .dialog-title {
   font-size: 16px;

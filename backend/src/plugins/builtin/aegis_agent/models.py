@@ -50,6 +50,11 @@ class AgentRun(IDMixin, TimestampMixin, Base):
         Integer, nullable=True, index=True, comment="关联工作区ID"
     )
 
+    # 会话标题（用户可见，首条消息自动生成，可重命名）
+    title: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, comment="会话标题"
+    )
+
     # 状态
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="created", index=True,
@@ -134,6 +139,9 @@ class AgentStep(IDMixin, TimestampMixin, Base):
     )
     output_content: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="LLM 输出文本"
+    )
+    reasoning_content: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="深度思考过程(DeepSeek reasoner 等)"
     )
     tool_calls_json: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="工具调用列表(JSON)"

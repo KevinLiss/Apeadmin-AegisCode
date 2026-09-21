@@ -48,6 +48,7 @@ from src.plugins.builtin.aegis_agent.schemas import (
     RunCreate,
     RunMessage,
     RunOut,
+    RunRename,
     StepOut,
     UsageLogOut,
     UsageSummary,
@@ -72,6 +73,7 @@ async def create_run(
         workspace_id=body.workspace_id,
         provider_id=body.provider_id,
         model_name=body.model_name,
+        title=body.title,
         max_tokens=body.max_tokens,
         max_steps=body.max_steps,
         max_cost_usd=body.max_cost_usd,
@@ -88,15 +90,22 @@ async def list_runs(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     status: str | None = Query(default=None),
+    workspace_id: int | None = Query(default=None, description="按项目过滤会话"),
 ):
-    """分页查询运行列表。"""
+    """分页查询运行列表（工作台传 workspace_id 拉取项目下的会话）。"""
     stmt = select(AgentRun).order_by(AgentRun.id.desc())
     if status:
         stmt = stmt.where(AgentRun.status == status)
+    if workspace_id is not None:
+        stmt = stmt.where(AgentRun.workspace_id == workspace_id)
 
     count_stmt = select(func.count()).select_from(AgentRun)
     if status:
         count_stmt = count_stmt.where(AgentRun.status == status)
+    if workspace_id is not None:
+        count_stmt = count_stmt.where(AgentRun.workspace_id == workspace_id)
+    if workspace_id is not None:
+        count_stmt = count_stmt.where(AgentRun.workspace_id == workspace_id)
 
     total = (await db.execute(count_stmt)).scalar() or 0
     stmt = stmt.offset((page - 1) * page_size).limit(page_size)
@@ -146,6 +155,23 @@ async def delete_run(
     agent_runtime._active_runs.pop(run_id, None)
 
     return success_response(msg="删除成功")
+
+
+@router.put("/runs/{run_id}/title")
+async def rename_run(
+    run_id: int,
+    body: RunRename,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("aegis_agent:runs:control"))],
+):
+    """重命名会话标题。"""
+    run = await db.get(AgentRun, run_id)
+    if not run:
+        raise NotFoundException("运行不存在")
+
+    run.title = body.title.strip()
+    await db.commit()
+    return success_response(msg="已重命名")
 
 
 # ---------------------------------------------------------------------------
@@ -338,6 +364,7 @@ async def list_messages(
             messages.append({
                 "role": "assistant",
                 "content": s.output_content,
+                "reasoning_content": s.reasoning_content,
                 "tool_calls": tool_calls,
                 "role_label": s.role,
                 "step_index": s.step_index,

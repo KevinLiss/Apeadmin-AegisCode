@@ -242,6 +242,7 @@ class AgentRuntime:
         max_cost_usd: Decimal | None = None,
         workflow_type: str = "single",
         system_prompt: str | None = None,
+        title: str | None = None,
     ) -> AgentRun:
         """创建 Agent 运行实例。"""
         # 自动选择 provider
@@ -267,6 +268,7 @@ class AgentRuntime:
             status=RunState.created.value,
             provider_id=provider_id,
             model_name=model_name,
+            title=title,
             max_tokens=max_tokens,
             max_steps=max_steps,
             max_cost_usd=max_cost_usd,
@@ -338,6 +340,14 @@ class AgentRuntime:
 
         # 添加用户消息到上下文
         active.context.add_user_message(content)
+
+        # 首条消息自动生成会话标题（截 30 字，用户未自定义时）
+        async with SessionLocal() as db:
+            run = await db.get(AgentRun, run_id)
+            if run and not run.title:
+                snippet = content.strip().replace("\n", " ")
+                run.title = snippet[:30] + ("..." if len(snippet) > 30 else "")
+                await db.commit()
 
         if stream:
             return self._run_loop_stream(active, content)
@@ -548,6 +558,7 @@ class AgentRuntime:
                 # 保存 LLM step
                 await self._save_step(active.run_id, active.step_counter, StepType.llm_call, {
                     "output_content": msg.get("content", ""),
+                    "reasoning_content": msg.get("reasoning_content") or msg.get("reasoning"),
                     "tool_calls_json": json.dumps(msg.get("tool_calls", []), ensure_ascii=False) if msg.get("tool_calls") else None,
                     "input_tokens": usage.input_tokens,
                     "output_tokens": usage.output_tokens,
@@ -663,10 +674,12 @@ class AgentRuntime:
 
                 # 流式调用 LLM
                 collected_content = ""
+                collected_reasoning = ""
                 collected_tool_calls: list[dict] = []
                 has_tool_calls = False
                 first_token_time = None
                 stream_usage: dict[str, Any] | None = None
+                reasoning_emitted = False
 
                 async for chunk_str in self._call_llm_stream(
                     llm_messages, api_key, config["base_url"], model_name, active,
@@ -690,9 +703,25 @@ class AgentRuntime:
                     choices = chunk.get("choices") or [{}]
                     delta = (choices[0] or {}).get("delta", {})
 
+                    # 深度思考（DeepSeek reasoner 等返回 reasoning_content）
+                    reasoning_delta = delta.get("reasoning_content") or delta.get("reasoning")
+                    if reasoning_delta:
+                        if not reasoning_emitted:
+                            reasoning_emitted = True
+                            yield json.dumps({"type": "reasoning_start"}, ensure_ascii=False)
+                        collected_reasoning += reasoning_delta
+                        yield json.dumps({
+                            "type": "reasoning_content",
+                            "content": reasoning_delta,
+                        }, ensure_ascii=False)
+
                     if delta.get("content"):
                         if first_token_time is None:
                             first_token_time = time.time()
+                        # 思考结束、正式回答开始
+                        if reasoning_emitted:
+                            reasoning_emitted = False
+                            yield json.dumps({"type": "reasoning_end"}, ensure_ascii=False)
                         collected_content += delta["content"]
                         yield json.dumps({
                             "type": "content",
@@ -751,6 +780,7 @@ class AgentRuntime:
                 # 保存 LLM step
                 await self._save_step(active.run_id, active.step_counter, StepType.llm_call, {
                     "output_content": collected_content,
+                    "reasoning_content": collected_reasoning or None,
                     "tool_calls_json": json.dumps(collected_tool_calls, ensure_ascii=False) if has_tool_calls else None,
                     "input_tokens": usage.input_tokens,
                     "output_tokens": usage.output_tokens,
@@ -1003,6 +1033,7 @@ class AgentRuntime:
                 step_type=step_type.value,
                 role=data.get("role"),
                 output_content=data.get("output_content"),
+                reasoning_content=data.get("reasoning_content"),
                 tool_calls_json=data.get("tool_calls_json"),
                 tool_name=data.get("tool_name"),
                 tool_args=data.get("tool_args"),

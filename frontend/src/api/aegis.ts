@@ -14,8 +14,8 @@ export const workspaceApi = {
   createProject: (data: { name: string; description?: string; storage_type?: 'cloud' | 'local'; root_hint?: string; git_enabled?: boolean }) =>
     request.post('/aegis-workspace/projects', data),
   deleteProject: (id: number) => request.delete(`/aegis-workspace/projects/${id}`),
-  listFiles: (projectId: number, path = '.') =>
-    request.get(`/aegis-workspace/projects/${projectId}/files`, { params: { path } }),
+  listFiles: (projectId: number, path = '.', recursive = false) =>
+    request.get(`/aegis-workspace/projects/${projectId}/files`, { params: { path, recursive } }),
   readFile: (projectId: number, path: string) =>
     request.get(`/aegis-workspace/projects/${projectId}/files/read`, { params: { path } }),
   writeFile: (projectId: number, path: string, content: string) =>
@@ -34,14 +34,18 @@ export const agentApi = {
     workspace_id?: number
     provider_id?: number
     model_name?: string
+    title?: string
     max_tokens?: number
     max_steps?: number
     workflow_type?: string
     system_prompt?: string
   }) => request.post('/aegis-agent/runs', data),
 
-  listRuns: (params?: { page?: number; page_size?: number; status?: string }) =>
+  listRuns: (params?: { page?: number; page_size?: number; status?: string; workspace_id?: number }) =>
     request.get('/aegis-agent/runs', { params }),
+
+  renameRun: (runId: number, title: string) =>
+    request.put(`/aegis-agent/runs/${runId}/title`, { title }),
 
   getRun: (runId: number) => request.get(`/aegis-agent/runs/${runId}`),
 
@@ -79,9 +83,29 @@ export const agentApi = {
     request.get('/aegis-agent/usage/summary', { params }),
 }
 
+// ── 项目统计（右侧项目管理面板） ──
+export const projectApi = {
+  getStats: (projectId: number) =>
+    request.get(`/aegis-workspace/projects/${projectId}/stats`),
+}
+
+// ── 项目成员 ──
+export const memberApi = {
+  listMembers: (projectId: number) =>
+    request.get(`/aegis-workspace/projects/${projectId}/members`),
+  addMember: (projectId: number, data: { user_id: number; role?: string; permissions?: string[] }) =>
+    request.post(`/aegis-workspace/projects/${projectId}/members`, data),
+  updateMember: (projectId: number, userId: number, data: { role?: string; permissions?: string[] }) =>
+    request.put(`/aegis-workspace/projects/${projectId}/members/${userId}`, data),
+  removeMember: (projectId: number, userId: number) =>
+    request.delete(`/aegis-workspace/projects/${projectId}/members/${userId}`),
+  listCandidates: (projectId: number, params?: { keyword?: string; limit?: number }) =>
+    request.get(`/aegis-workspace/projects/${projectId}/members/candidates`, { params }),
+}
+
 // ── AI Provider（复用底座） ──
 export const providerApi = {
-  listProviders: () => request.get('/ai-providers'),
+  listProviders: () => request.get('/ai/providers'),
 }
 
 // ── 预算策略 ──

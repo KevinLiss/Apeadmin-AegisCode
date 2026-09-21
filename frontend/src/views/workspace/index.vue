@@ -23,15 +23,15 @@
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
           </svg>
         </button>
+        <button class="header-btn" @click="togglePanel('project')" :class="{ active: activePanel === 'project' }" title="项目管理">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7"/><rect x="12" y="6" width="3" height="11"/><rect x="17" y="13" width="3" height="4"/>
+          </svg>
+        </button>
         <button class="header-btn" @click="togglePanel('git')" :class="{ active: activePanel === 'git' }" title="Git 快照">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/>
             <path d="M13 6h3a2 2 0 0 1 2 2v7M6 9v6"/>
-          </svg>
-        </button>
-        <button class="header-btn" @click="togglePanel('usage')" :class="{ active: activePanel === 'usage' }" title="用量统计">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 6-6"/>
           </svg>
         </button>
       </div>
@@ -42,15 +42,20 @@
       <ProjectSidebar
         ref="projectSidebarRef"
         :current-project-id="currentProjectId"
+        :current-session-id="currentSessionId"
         @select-project="onSelectProject"
+        @select-session="onSelectSession"
+        @create-session="onCreateSession"
       />
 
       <!-- 中间对话区 -->
       <ChatArea
         v-if="currentProject"
-        :key="currentProject.id"
+        :key="`chat-${currentProject.id}-${currentSessionId ?? 'new'}`"
         :project="currentProject"
+        :session-id="currentSessionId"
         @run-status-change="onRunStatusChange"
+        @session-created="onSessionCreated"
       />
       <!-- 空状态 -->
       <div class="workspace-empty" v-else>
@@ -72,13 +77,13 @@
             :project="currentProject"
             @close="activePanel = ''"
           />
-          <GitPanel
-            v-if="activePanel === 'git'"
+          <ProjectPanel
+            v-if="activePanel === 'project'"
             :project="currentProject"
             @close="activePanel = ''"
           />
-          <UsagePanel
-            v-if="activePanel === 'usage'"
+          <GitPanel
+            v-if="activePanel === 'git'"
             :project="currentProject"
             @close="activePanel = ''"
           />
@@ -95,7 +100,7 @@ import ProjectSidebar from './components/ProjectSidebar.vue'
 import ChatArea from './components/ChatArea.vue'
 import FilesPanel from './components/FilesPanel.vue'
 import GitPanel from './components/GitPanel.vue'
-import UsagePanel from './components/UsagePanel.vue'
+import ProjectPanel from './components/ProjectPanel.vue'
 
 const router = useRouter()
 
@@ -103,17 +108,19 @@ const router = useRouter()
 const currentProjectId = ref<number | null>(null)
 const currentProject = computed(() => {
   if (!currentProjectId.value) return null
-  // 从 ProjectSidebar 获取项目数据
   return projectSidebarRef.value?.getProject(currentProjectId.value) ?? null
 })
+
+// ── 会话状态（null = 未选会话，新建后填充） ──
+const currentSessionId = ref<number | null>(null)
 
 // 用 ref 拿到 ProjectSidebar 组件实例
 const projectSidebarRef = ref<InstanceType<typeof ProjectSidebar> | null>(null)
 
 // ── 面板切换 ──
-const activePanel = ref<'files' | 'git' | 'usage' | ''>('')
+const activePanel = ref<'files' | 'git' | 'project' | ''>('')
 
-function togglePanel(panel: 'files' | 'git' | 'usage') {
+function togglePanel(panel: 'files' | 'git' | 'project') {
   activePanel.value = activePanel.value === panel ? '' : panel
 }
 
@@ -137,9 +144,31 @@ function onRunStatusChange(status: string) {
 // ── 事件处理 ──
 function onSelectProject(projectId: number) {
   currentProjectId.value = projectId
+  currentSessionId.value = null
   activePanel.value = ''
   runStatus.value = 'idle'
 }
+
+function onSelectSession(projectId: number, sessionId: number) {
+  currentProjectId.value = projectId
+  currentSessionId.value = sessionId
+  activePanel.value = ''
+}
+
+async function onCreateSession(projectId: number) {
+  currentProjectId.value = projectId
+  currentSessionId.value = null
+  activePanel.value = ''
+  runStatus.value = 'idle'
+}
+
+function onSessionCreated(sessionId: number) {
+  currentSessionId.value = sessionId
+  // 让侧栏刷新会话列表并选中
+  projectSidebarRef.value?.ensureSessionVisible(currentProjectId.value!, sessionId)
+}
+
+// ChatArea 发送首条消息后会话创建成功，同步侧栏
 
 function goBack() {
   router.push('/dashboard-monitor')

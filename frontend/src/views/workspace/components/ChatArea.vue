@@ -51,6 +51,20 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
           </div>
           <div class="msg-content">
+            <!-- 深度思考折叠面板 -->
+            <div v-if="msg.reasoning_content" class="thinking-card" :class="{ open: msg._thinkingOpen }">
+              <div class="thinking-header" @click="msg._thinkingOpen = !msg._thinkingOpen">
+                <svg class="thinking-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 16v-4"/><circle cx="12" cy="8" r="0.5"/>
+                </svg>
+                <span class="thinking-label">深度思考</span>
+                <span class="thinking-status" v-if="!msg._thinkingOpen">✓ 已完成</span>
+                <svg class="thinking-arrow" :class="{ open: msg._thinkingOpen }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </div>
+              <div v-if="msg._thinkingOpen" class="thinking-body">{{ msg.reasoning_content }}</div>
+            </div>
             <div class="msg-bubble assistant" v-if="msg.content" v-html="renderContent(msg.content)"></div>
             <div v-if="msg.tool_calls && msg.tool_calls.length" class="tool-calls-list">
               <div v-for="(tc, tci) in msg.tool_calls" :key="tci" class="tool-call-card">
@@ -95,8 +109,18 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/></svg>
         </div>
         <div class="msg-content">
+          <!-- 流式深度思考面板 -->
+          <div v-if="streamReasoning" class="thinking-card streaming">
+            <div class="thinking-header">
+              <svg class="thinking-icon spinning" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+              </svg>
+              <span class="thinking-label">深度思考 进行中...</span>
+            </div>
+            <div class="thinking-body streaming-preview">{{ streamReasoning.slice(-600) }}</div>
+          </div>
           <div class="msg-bubble assistant streaming" v-if="streamContent" v-html="renderContent(streamContent)"></div>
-          <div class="streaming-indicator" v-else>
+          <div class="streaming-indicator" v-if="!streamContent && !streamReasoning">
             <span class="dot"></span><span class="dot"></span><span class="dot"></span>
           </div>
         </div>
@@ -106,6 +130,37 @@
     <!-- 输入区 -->
     <div class="input-area">
       <div class="input-wrapper">
+        <!-- 模型选择器 -->
+        <div class="model-selector">
+          <button class="model-trigger" @click.stop="showModelMenu = !showModelMenu">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/>
+            </svg>
+            <span class="model-trigger-name">{{ selectedModelLabel }}</span>
+            <svg class="chev" :class="{ open: showModelMenu }" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          <Transition name="menu-fade">
+            <div v-if="showModelMenu" class="model-menu">
+              <div
+                v-for="opt in modelOptions"
+                :key="opt.key"
+                class="model-option"
+                :class="{ active: selectedModel === opt.key }"
+                @click="selectModel(opt.key)"
+              >
+                <div class="model-option-top">
+                  <span class="model-option-name">{{ opt.label }}</span>
+                  <span v-if="opt.key === 'auto'" class="model-tag auto">Auto</span>
+                  <span v-else-if="opt.vision" class="model-tag vision">视觉</span>
+                  <span v-if="selectedModel === opt.key" class="model-check">✓</span>
+                </div>
+                <div class="model-option-desc">{{ opt.desc }}</div>
+              </div>
+            </div>
+          </Transition>
+        </div>
         <textarea
           ref="inputRef"
           v-model="inputText"
@@ -118,57 +173,142 @@
         ></textarea>
         <button
           class="send-btn"
-          :disabled="!inputText.trim() || streaming"
-          @click="sendMessage()"
+          :class="{ stop: streaming }"
+          :disabled="!inputText.trim() && !streaming"
+          @click="streaming ? controlRun('cancel') : sendMessage()"
         >
           <svg v-if="!streaming" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
           </svg>
-          <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin">
-            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="6" width="12" height="12" rx="2"/>
           </svg>
         </button>
       </div>
-      <div class="input-hint" v-if="!runId">首次对话将自动创建 Agent 运行</div>
+      <div class="input-hint" v-if="!runId">首次对话将自动创建会话，标题自动生成</div>
     </div>
   </main>
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted, watch, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
-import { agentApi } from '@/api/aegis'
+import { agentApi, providerApi } from '@/api/aegis'
 
-const props = defineProps<{ project: { id: number; name: string; root_path: string } }>()
-const emit = defineEmits<{ runStatusChange: [string] }>()
+const props = defineProps<{
+  project: { id: number; name: string; root_path: string }
+  sessionId?: number | null
+}>()
+const emit = defineEmits<{
+  runStatusChange: [string]
+  sessionCreated: [sessionId: number]
+}>()
 
 // ── 状态 ──
 const messages = ref<any[]>([])
 const inputText = ref('')
 const streaming = ref(false)
 const streamContent = ref('')
+const streamReasoning = ref('')
 const runId = ref<number | null>(null)
 const status = ref<string>('idle')
 const runInfo = ref<any>(null)
 const messagesContainer = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 
-// ── 初始化：尝试加载该项目的已有 Run ──
-onMounted(async () => {
+// ── 模型选择器 ──
+const modelOptions = ref<any[]>([])
+const showModelMenu = ref(false)
+const selectedModel = ref('auto')
+
+interface ModelMeta {
+  key: string
+  label: string
+  desc: string
+  vision?: boolean
+}
+
+// 从 AiProvider.model_details 拉取可选模型
+async function loadModelOptions() {
+  const autoOpt: ModelMeta = { key: 'auto', label: 'Auto 自动选择', desc: '根据任务自动选择最合适的模型' }
   try {
-    const res: any = await agentApi.listRuns({ page: 1, page_size: 1, status: 'running' })
-    if (res.items && res.items.length > 0) {
-      // 如果有活跃的 run，恢复它
-      runId.value = res.items[0].id
-      runInfo.value = res.items[0]
-      status.value = res.items[0].status
+    const res: any = await providerApi.listProviders()
+    const items = res.items || []
+    const opts: ModelMeta[] = [autoOpt]
+    for (const p of items) {
+      const details = p.model_details || {}
+      for (const [name, meta] of Object.entries<any>(details)) {
+        opts.push({
+          key: name,
+          label: name,
+          desc: meta?.description || p.name || p.provider_type,
+          vision: !!meta?.supports_vision,
+        })
+      }
+      // model_details 为空时用 models 列表兜底
+      if (!Object.keys(details).length && Array.isArray(p.models)) {
+        for (const name of p.models) {
+          if (typeof name === 'string' && name) {
+            opts.push({ key: name, label: name, desc: p.name || p.provider_type })
+          }
+        }
+      }
+    }
+    modelOptions.value = opts
+  } catch {
+    modelOptions.value = [autoOpt]
+  }
+}
+
+// ── 初始化：按外部指定的会话恢复（含历史），否则新建 ──
+async function loadSession(sessionId: number | null) {
+  // 重置会话状态
+  messages.value = []
+  runId.value = null
+  runInfo.value = null
+  status.value = 'idle'
+  streamContent.value = ''
+  streaming.value = false
+
+  if (!sessionId) return
+  try {
+    const res: any = await agentApi.getRun(sessionId)
+    if (res && res.id) {
+      runId.value = res.id
+      runInfo.value = res
+      status.value = res.status || 'idle'
       emit('runStatusChange', status.value)
+      if (res.status === 'running' || res.status === 'paused') {
+        emit('runStatusChange', res.status)
+      }
       await loadHistory()
     }
   } catch {
-    // 忽略，首次使用没有 run
+    // 会话可能已被删除，忽略
+  }
+}
+
+onMounted(() => {
+  loadSession(props.sessionId ?? null)
+  loadModelOptions()
+})
+
+// 外部切换会话时重新加载
+watch(() => props.sessionId ?? null, (newId) => {
+  if (newId !== runId.value) {
+    loadSession(newId)
   }
 })
+
+// 点击外部关闭模型菜单
+function onClickOutsideModelMenu(e: MouseEvent) {
+  const menu = document.querySelector('.model-selector')
+  if (menu && !menu.contains(e.target as Node)) {
+    showModelMenu.value = false
+  }
+}
+onMounted(() => document.addEventListener('click', onClickOutsideModelMenu))
+onBeforeUnmount(() => document.removeEventListener('click', onClickOutsideModelMenu))
 
 // ── 加载历史消息 ──
 async function loadHistory() {
@@ -176,12 +316,27 @@ async function loadHistory() {
   try {
     const res: any = await agentApi.listMessages(runId.value)
     if (res.messages) {
-      messages.value = res.messages.map((m: any) => ({ ...m, _expanded: false }))
+      messages.value = res.messages.map((m: any) => ({
+        ...m,
+        _expanded: false,
+        _thinkingOpen: false,
+      }))
       await scrollToBottom()
     }
   } catch {
     // 忽略
   }
+}
+
+// ── 模型选择 ──
+const selectedModelLabel = computed(() => {
+  const opt = modelOptions.value.find((o) => o.key === selectedModel.value)
+  return opt ? (opt.key === 'auto' ? 'Auto' : opt.label) : 'Auto'
+})
+
+function selectModel(key: string) {
+  selectedModel.value = key
+  showModelMenu.value = false
 }
 
 // ── 发送消息 ──
@@ -196,16 +351,19 @@ async function sendMessage(presetText?: string) {
   messages.value.push({ role: 'user', content: text })
   await scrollToBottom()
 
-  // 首次发送：创建 run
+  // 首次发送：创建 run（带标题）
   if (!runId.value) {
     try {
       const res: any = await agentApi.createRun({
         workspace_id: props.project.id,
+        ...(selectedModel.value && selectedModel.value !== 'auto' ? { model_name: selectedModel.value } : {}),
       })
       runId.value = res.id
       status.value = res.status || 'running'
-      runInfo.value = { model_name: 'auto' }
+      runInfo.value = { model_name: selectedModel.value }
       emit('runStatusChange', 'running')
+      // 通知侧栏新会话已创建（首条消息会自动生成标题）
+      emit('sessionCreated', res.id)
     } catch (e: any) {
       ElMessage.error('创建 Agent 运行失败: ' + (e.message || ''))
       return
@@ -215,6 +373,8 @@ async function sendMessage(presetText?: string) {
   // SSE 流式发送
   streaming.value = true
   streamContent.value = ''
+  streamReasoning.value = ''
+  streamReasoningDone.value = false
 
   try {
     const response = await agentApi.sendMessage(runId.value!, text, true) as Response
@@ -266,21 +426,38 @@ async function sendMessage(presetText?: string) {
     })
   } finally {
     // 流式结束，将 streamContent 合并到消息列表
-    if (streamContent.value) {
+    if (streamContent.value || streamReasoning.value) {
       messages.value.push({
         role: 'assistant',
         content: streamContent.value,
+        reasoning_content: streamReasoning.value || undefined,
       })
     }
     streamContent.value = ''
+    streamReasoning.value = ''
     streaming.value = false
     await scrollToBottom()
   }
 }
 
 // ── 处理 SSE 事件 ──
+const streamReasoningDone = ref(false)
+
 async function handleSSEEvent(event: any) {
   switch (event.type) {
+    case 'reasoning_start':
+      // 深度思考开始
+      break
+
+    case 'reasoning_content':
+      streamReasoning.value += event.content
+      await scrollToBottom()
+      break
+
+    case 'reasoning_end':
+      streamReasoningDone.value = true
+      break
+
     case 'content':
       streamContent.value += event.content
       await scrollToBottom()
@@ -288,9 +465,14 @@ async function handleSSEEvent(event: any) {
 
     case 'tool_call':
       // 将累积的 streamContent 先存为 assistant 消息
-      if (streamContent.value) {
-        messages.value.push({ role: 'assistant', content: streamContent.value })
+      if (streamContent.value || streamReasoning.value) {
+        messages.value.push({
+          role: 'assistant',
+          content: streamContent.value,
+          reasoning_content: streamReasoning.value || undefined,
+        })
         streamContent.value = ''
+        streamReasoning.value = ''
       }
       // 添加工具调用卡片
       messages.value.push({
@@ -733,6 +915,181 @@ function onShiftEnter() {
 @keyframes bounce {
   0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
   40% { transform: scale(1); opacity: 1; }
+}
+
+/* ── 深度思考折叠面板 ── */
+.thinking-card {
+  border-radius: 10px;
+  border: 1px solid #dde4f0;
+  background: #f6f8fc;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.thinking-card.streaming {
+  border-color: #c7d4ea;
+}
+.thinking-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.thinking-icon {
+  color: #7c8db5;
+  flex-shrink: 0;
+}
+.thinking-icon.spinning {
+  animation: spin 1s linear infinite;
+  color: #5b6ea8;
+}
+.thinking-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7ca6;
+}
+.thinking-status {
+  font-size: 11px;
+  color: #93a2c4;
+}
+.thinking-arrow {
+  margin-left: auto;
+  color: #93a2c4;
+  transition: transform 0.2s;
+}
+.thinking-arrow.open {
+  transform: rotate(180deg);
+}
+.thinking-body {
+  padding: 4px 14px 10px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #8b98b8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.thinking-body.streaming-preview {
+  padding-top: 0;
+}
+
+/* ── 模型选择器 ── */
+.model-selector {
+  position: relative;
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+.model-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 42px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--theme-border-color, #e5e7eb);
+  background: var(--theme-body-bg, #f9fafb);
+  color: var(--theme-text-secondary, #6b7280);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.model-trigger:hover {
+  border-color: var(--el-color-primary, #4f46e5);
+}
+.model-trigger .chev {
+  transition: transform 0.2s;
+}
+.model-trigger .chev.open {
+  transform: rotate(180deg);
+}
+.model-menu {
+  position: absolute;
+  bottom: 50px;
+  left: 0;
+  width: 300px;
+  max-height: 340px;
+  overflow-y: auto;
+  background: var(--theme-card-bg, #fff);
+  border: 1px solid var(--theme-border-color, #e5e7eb);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.13);
+  z-index: 100;
+  padding: 6px;
+}
+.model-option {
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.model-option:hover {
+  background: var(--theme-hover-bg, #f3f4f6);
+}
+.model-option.active {
+  background: var(--el-color-primary-light-9, #eef2ff);
+}
+.model-option-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.model-option-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--theme-text-color, #1f2937);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-option.active .model-option-name {
+  color: var(--el-color-primary, #4f46e5);
+}
+.model-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+.model-tag.auto {
+  background: #ede9fe;
+  color: #7c3aed;
+}
+.model-tag.vision {
+  background: #dcfce7;
+  color: #16a34a;
+}
+.model-check {
+  flex-shrink: 0;
+  color: var(--el-color-primary, #4f46e5);
+  font-weight: 700;
+  font-size: 12px;
+}
+.model-option-desc {
+  font-size: 11px;
+  color: var(--theme-text-secondary, #9ca3af);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu-fade-enter-active,
+.menu-fade-leave-active {
+  transition: opacity 0.15s, transform 0.15s;
+}
+.menu-fade-enter-from,
+.menu-fade-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+/* 发送按钮生成中变停止 */
+.send-btn.stop {
+  background: #ef4444;
 }
 
 /* ── 输入区 ── */

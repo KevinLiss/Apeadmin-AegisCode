@@ -19,10 +19,11 @@
 """
 
 import json
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.deps import get_current_user, require_permission
@@ -195,6 +196,78 @@ async def delete_project(
     return success_response(msg="项目已删除")
 
 
+@router.get("/projects/{project_id}/stats")
+async def get_project_stats(
+    project_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:list"))],
+):
+    """项目统计（右侧项目管理面板）。
+
+    返回:
+    - token: 总Token/会话数/消息数（聚合本项目所有 AgentRun + AgentUsageLog）
+    - files: 文件数/总大小（磁盘递归统计，跳过 .git）
+    - run 集计来自 aegis_agent_runs（workspace_id 关联）
+    """
+    project = await db.get(WorkspaceProject, project_id)
+    if not project:
+        raise NotFoundException("项目不存在")
+
+    from src.plugins.builtin.aegis_agent.models import AgentRun, AgentStep, AgentUsageLog
+
+    # ── Token 用量：run 集计 + usage_log 精确值 ──
+    run_stmt = select(AgentRun).where(AgentRun.workspace_id == project_id)
+    runs = (await db.execute(run_stmt)).scalars().all()
+    run_ids = [r.id for r in runs]
+
+    total_input = sum(r.total_input_tokens for r in runs)
+    total_output = sum(r.total_output_tokens for r in runs)
+    total_tokens = total_input + total_output
+
+    if run_ids:
+        usage_stmt = select(
+            func.coalesce(func.sum(AgentUsageLog.input_tokens), 0),
+            func.coalesce(func.sum(AgentUsageLog.output_tokens), 0),
+        ).where(AgentUsageLog.run_id.in_(run_ids))
+        u_in, u_out = (await db.execute(usage_stmt)).one()
+        total_tokens = int(u_in or 0) + int(u_out or 0) or total_tokens
+
+    message_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(AgentStep)
+            .where(AgentStep.run_id.in_(run_ids), AgentStep.step_type == "llm_call")
+            if run_ids
+            else select(func.count()).select_from(AgentRun).where(true() == False)  # noqa: E712 空集哨兵
+        )
+    ).scalar() or 0
+
+    # ── 文件存储：磁盘递归统计（跳过 .git）──
+    file_count = 0
+    total_size = 0
+    root = Path(project.root_path) if project.root_path else None
+    if root and root.is_dir():
+        for p in root.rglob("*"):
+            if p.is_file() and ".git" not in p.parts:
+                try:
+                    file_count += 1
+                    total_size += p.stat().st_size
+                except OSError:
+                    pass
+
+    return success_response(data={
+        "token": {
+            "total_tokens": total_tokens,
+            "session_count": len(runs),
+            "message_count": message_count,
+        },
+        "files": {
+            "file_count": file_count,
+            "total_size": total_size,
+        },
+    })
+
+
 # ---------------------------------------------------------------------------
 # 文件操作
 # ---------------------------------------------------------------------------
@@ -205,11 +278,40 @@ async def list_files(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(require_permission("aegis_workspace:projects:list"))],
     path: str = Query(default="."),
+    recursive: bool = Query(default=False),
 ):
-    """列出项目文件。"""
+    """列出项目文件。
+
+    recursive=true 时递归返回所有文件（相对路径，跳过 .git 与隐藏目录），
+    供文件管理面板三分类展示；否则按目录列一层。
+    """
     project = await db.get(WorkspaceProject, project_id)
     if not project:
         raise NotFoundException("项目不存在")
+
+    if recursive:
+        from src.plugins.builtin.aegis_workspace.sandbox import Sandbox, SandboxConfig
+        sandbox = Sandbox(SandboxConfig(root_path=project.root_path))
+        valid, resolved = sandbox.validate_path(path)
+        if not valid:
+            raise ValidationException(resolved)
+        base = Path(resolved)
+        if not base.is_dir():
+            raise ValidationException(f"不是目录: {path}")
+        entries: list[dict] = []
+        for p in base.rglob("*"):
+            if ".git" in p.parts or any(part.startswith(".") for part in p.relative_to(base).parts):
+                continue
+            rel = str(p.relative_to(base))
+            if p.is_dir():
+                entries.append({"name": p.name, "path": rel, "type": "dir", "size": 0})
+            else:
+                try:
+                    entries.append({"name": p.name, "path": rel, "type": "file", "size": p.stat().st_size})
+                except OSError:
+                    pass
+        entries.sort(key=lambda e: (e["type"] != "dir", e["path"]))
+        return success_response(data={"path": path, "items": entries, "total": len(entries), "recursive": True})
 
     from src.plugins.builtin.aegis_workspace.tools.file import list_directory
     result = await list_directory(project.root_path, path)
