@@ -373,6 +373,7 @@ import { agentApi, providerApi, skillApi, workspaceApi } from '@/api/aegis'
 const props = defineProps<{
   project: { id: number; name: string; root_path: string }
   sessionId?: number | null
+  newSessionNonce?: number
 }>()
 const emit = defineEmits<{
   runStatusChange: [string]
@@ -658,6 +659,11 @@ watch(() => props.sessionId ?? null, (newId) => {
   if (newId !== loadedSessionId) {
     loadSession(newId)
   }
+})
+
+// 新建会话触发：即使 sessionId 从 null→null 不变，也强制重置（清空对话区）
+watch(() => props.newSessionNonce ?? 0, () => {
+  loadSession(null)
 })
 
 // 点击外部关闭弹层

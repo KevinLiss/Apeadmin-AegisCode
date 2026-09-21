@@ -53,6 +53,7 @@
         :key="`chat-${currentProject.id}`"
         :project="currentProject"
         :session-id="currentSessionId"
+        :new-session-nonce="newSessionNonce"
         @run-status-change="onRunStatusChange"
         @session-created="onSessionCreated"
         @streaming-change="onStreamingChange"
@@ -118,6 +119,9 @@ const currentProject = computed(() => {
 // ── 会话状态（null = 未选会话，新建后填充） ──
 const currentSessionId = ref<number | null>(null)
 
+// 新建会话触发器：每次点击「新建会话」递增，驱动 ChatArea 强制重置（解决已在空白状态再点无响应）
+const newSessionNonce = ref(0)
+
 // 用 ref 拿到 ProjectSidebar 组件实例
 const projectSidebarRef = ref<InstanceType<typeof ProjectSidebar> | null>(null)
 
@@ -173,6 +177,7 @@ async function onCreateSession(projectId: number) {
   currentSessionId.value = null
   activePanel.value = ''
   runStatus.value = 'idle'
+  newSessionNonce.value++
 }
 
 function onSessionCreated(sessionId: number) {
