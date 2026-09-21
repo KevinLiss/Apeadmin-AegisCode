@@ -34,13 +34,13 @@ async def seed_aegis_workspace_data(db: AsyncSession) -> None:
         await db.flush()
 
     menu_specs = [
-        ("工作区管理", "AegisCode", "C", "workspace", "aegis_workspace/projects/index", "aegis_workspace:projects:list", "Folder", 3),
-        ("创建项目", "工作区管理", "F", None, None, "aegis_workspace:projects:create", None, 1),
-        ("编辑项目", "工作区管理", "F", None, None, "aegis_workspace:projects:edit", None, 2),
-        ("删除项目", "工作区管理", "F", None, None, "aegis_workspace:projects:delete", None, 3),
-        ("执行命令", "工作区管理", "F", None, None, "aegis_workspace:execute", None, 4),
-        ("Git 快照", "工作区管理", "F", None, None, "aegis_workspace:snapshot", None, 5),
-        ("成员管理", "工作区管理", "F", None, None, "aegis_workspace:members:manage", None, 6),
+        ("工作区管理", "AegisCode", "C", "workspace", "aegis_agent/workspace/projects/index", "aegis_agent:workspace:projects:list", "Folder", 3),
+        ("创建项目", "工作区管理", "F", None, None, "aegis_agent:workspace:projects:create", None, 1),
+        ("编辑项目", "工作区管理", "F", None, None, "aegis_agent:workspace:projects:edit", None, 2),
+        ("删除项目", "工作区管理", "F", None, None, "aegis_agent:workspace:projects:delete", None, 3),
+        ("执行命令", "工作区管理", "F", None, None, "aegis_agent:workspace:execute", None, 4),
+        ("Git 快照", "工作区管理", "F", None, None, "aegis_agent:workspace:snapshot", None, 5),
+        ("成员管理", "工作区管理", "F", None, None, "aegis_agent:workspace:members:manage", None, 6),
     ]
 
     existing = list((await db.execute(select(Menu))).scalars().all())
@@ -64,7 +64,7 @@ async def seed_aegis_workspace_data(db: AsyncSession) -> None:
         created_menus.append(menu)
 
     if created_menus:
-        logger.info(f"Created {len(created_menus)} aegis_workspace menus")
+        logger.info(f"Created {len(created_menus)} aegis_agent workspace menus")
 
     admin_result = await db.execute(select(Role).where(Role.code == "admin"))
     admin_role = admin_result.scalars().first()
@@ -78,4 +78,4 @@ async def seed_aegis_workspace_data(db: AsyncSession) -> None:
             from sqlalchemy import insert
             await db.execute(insert(role_menu), new_bindings)
             await db.flush()
-            logger.info(f"Bound {len(new_bindings)} aegis_workspace menus to admin role")
+            logger.info(f"Bound {len(new_bindings)} aegis_agent workspace menus to admin role")

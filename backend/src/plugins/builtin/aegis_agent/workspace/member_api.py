@@ -1,6 +1,6 @@
 """AegisCode 项目成员 API 路由。
 
-挂在 aegis_workspace 插件下, 路由前缀复用 /aegis-workspace
+挂在 aegis_agent 插件（workspace 子模块）下, 路由前缀复用 /aegis-workspace
 
 接口:
 - GET    /projects/{id}/members                成员列表(含 owner)
@@ -26,13 +26,13 @@ from src.core.exceptions import (
 )
 from src.db import get_db
 from src.models import User
-from src.plugins.builtin.aegis_workspace.member_models import (
+from src.plugins.builtin.aegis_agent.workspace.member_models import (
     AVAILABLE_PERMISSIONS,
     MEMBER_ROLES,
     ROLE_DEFAULT_PERMISSIONS,
     WorkspaceProjectMember,
 )
-from src.plugins.builtin.aegis_workspace.models import WorkspaceProject
+from src.plugins.builtin.aegis_agent.workspace.models import WorkspaceProject
 
 router = APIRouter(prefix="/aegis-workspace", tags=["AegisCode 项目成员"])
 
@@ -73,7 +73,7 @@ async def _get_project_or_404(db: AsyncSession, project_id: int) -> WorkspacePro
 async def get_member_role_dict(
     project_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:list"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:list"))],
 ):
     """角色与权限点字典（前端渲染复选框用）。"""
     return success_response(data={
@@ -87,7 +87,7 @@ async def get_member_role_dict(
 async def get_member_candidates(
     project_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:list"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:list"))],
     keyword: Optional[str] = Query(default=None, max_length=50),
     limit: int = Query(default=20, ge=1, le=50),
 ):
@@ -124,7 +124,7 @@ async def get_member_candidates(
 async def list_project_members(
     project_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:list"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:list"))],
 ):
     """项目成员列表（owner 恒在首位）。"""
     project = await _get_project_or_404(db, project_id)
@@ -163,7 +163,7 @@ async def add_project_member(
     project_id: int,
     body: dict,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))],
 ):
     """添加项目成员。"""
     project = await _get_project_or_404(db, project_id)
@@ -228,7 +228,7 @@ async def update_project_member(
     member_user_id: int,
     body: dict,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))],
 ):
     """修改成员角色与权限。"""
     await _get_project_or_404(db, project_id)
@@ -280,7 +280,7 @@ async def remove_project_member(
     project_id: int,
     member_user_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))],
 ):
     """移除项目成员。"""
     project = await _get_project_or_404(db, project_id)

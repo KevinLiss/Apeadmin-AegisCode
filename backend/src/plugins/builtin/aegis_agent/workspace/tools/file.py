@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from src.plugins.builtin.aegis_workspace.sandbox import Sandbox, SandboxConfig
+from src.plugins.builtin.aegis_agent.workspace.sandbox import Sandbox, SandboxConfig
 
 
 async def read_file(project_root: str, file_path: str) -> str:

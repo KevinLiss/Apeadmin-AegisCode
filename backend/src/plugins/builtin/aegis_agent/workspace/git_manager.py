@@ -14,8 +14,8 @@ from loguru import logger
 from sqlalchemy import select
 
 from src.db import SessionLocal
-from src.plugins.builtin.aegis_workspace.models import WorkspaceSnapshot
-from src.plugins.builtin.aegis_workspace.sandbox import Sandbox, SandboxConfig
+from src.plugins.builtin.aegis_agent.workspace.models import WorkspaceSnapshot
+from src.plugins.builtin.aegis_agent.workspace.sandbox import Sandbox, SandboxConfig
 
 
 @dataclass

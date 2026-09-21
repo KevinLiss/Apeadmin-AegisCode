@@ -11,16 +11,16 @@ from sqlalchemy import select
 
 from src.db import SessionLocal
 from src.mcp import mcp_manager
-from src.plugins.builtin.aegis_workspace.models import WorkspaceProject
-from src.plugins.builtin.aegis_workspace.tools.file import (
+from src.plugins.builtin.aegis_agent.workspace.models import WorkspaceProject
+from src.plugins.builtin.aegis_agent.workspace.tools.file import (
     read_file,
     write_file,
     list_directory,
     delete_file,
     move_file,
 )
-from src.plugins.builtin.aegis_workspace.tools.command import execute_command
-from src.plugins.builtin.aegis_workspace.tools.search import search_code
+from src.plugins.builtin.aegis_agent.workspace.tools.command import execute_command
+from src.plugins.builtin.aegis_agent.workspace.tools.search import search_code
 
 
 # ---------------------------------------------------------------------------
@@ -171,19 +171,19 @@ async def _aegis_list_projects(status: str | None = None) -> str:
 def register_aegis_workspace_mcp_tools() -> None:
     """注册工作区 MCP 工具。"""
     # 文件工具
-    mcp_manager.register_tool("aegis_read_file", "读取项目文件内容", _aegis_read_file, plugin_name="aegis_workspace", category="aegis_workspace")
-    mcp_manager.register_tool("aegis_write_file", "写入或创建项目文件", _aegis_write_file, plugin_name="aegis_workspace", category="aegis_workspace")
-    mcp_manager.register_tool("aegis_list_directory", "列出项目目录内容", _aegis_list_directory, plugin_name="aegis_workspace", category="aegis_workspace")
-    mcp_manager.register_tool("aegis_delete_file", "删除项目文件", _aegis_delete_file, plugin_name="aegis_workspace", category="aegis_workspace")
-    mcp_manager.register_tool("aegis_move_file", "移动或重命名项目文件", _aegis_move_file, plugin_name="aegis_workspace", category="aegis_workspace")
+    mcp_manager.register_tool("aegis_read_file", "读取项目文件内容", _aegis_read_file, plugin_name="aegis_agent", category="aegis_agent")
+    mcp_manager.register_tool("aegis_write_file", "写入或创建项目文件", _aegis_write_file, plugin_name="aegis_agent", category="aegis_agent")
+    mcp_manager.register_tool("aegis_list_directory", "列出项目目录内容", _aegis_list_directory, plugin_name="aegis_agent", category="aegis_agent")
+    mcp_manager.register_tool("aegis_delete_file", "删除项目文件", _aegis_delete_file, plugin_name="aegis_agent", category="aegis_agent")
+    mcp_manager.register_tool("aegis_move_file", "移动或重命名项目文件", _aegis_move_file, plugin_name="aegis_agent", category="aegis_agent")
 
     # 命令工具
-    mcp_manager.register_tool("aegis_execute_command", "在项目沙箱内执行 shell 命令", _aegis_execute_command, plugin_name="aegis_workspace", category="aegis_workspace")
+    mcp_manager.register_tool("aegis_execute_command", "在项目沙箱内执行 shell 命令", _aegis_execute_command, plugin_name="aegis_agent", category="aegis_agent")
 
     # 搜索工具
-    mcp_manager.register_tool("aegis_search_code", "在项目内搜索代码", _aegis_search_code, plugin_name="aegis_workspace", category="aegis_workspace")
+    mcp_manager.register_tool("aegis_search_code", "在项目内搜索代码", _aegis_search_code, plugin_name="aegis_agent", category="aegis_agent")
 
     # 项目管理
-    mcp_manager.register_tool("aegis_list_projects", "列出工作区项目", _aegis_list_projects, plugin_name="aegis_workspace", category="aegis_workspace")
+    mcp_manager.register_tool("aegis_list_projects", "列出工作区项目", _aegis_list_projects, plugin_name="aegis_agent", category="aegis_agent")
 
-    logger.info("Registered 8 aegis_workspace MCP tools")
+    logger.info("Registered 8 aegis workspace MCP tools")

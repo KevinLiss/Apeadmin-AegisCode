@@ -1,7 +1,7 @@
 """AegisCode 工作区 API 路由。
 
 路由前缀: /aegis-workspace
-权限标识: aegis_workspace:*
+权限标识: aegis_agent:workspace:*
 
 接口:
 - POST   /projects           创建项目
@@ -37,14 +37,14 @@ from src.core.deps import get_current_user, require_permission
 from src.core.exceptions import NotFoundException, ValidationException, success_response
 from src.db import get_db
 from src.models import User
-from src.plugins.builtin.aegis_workspace.models import (
+from src.plugins.builtin.aegis_agent.workspace.models import (
     WorkspaceExecution,
     WorkspaceFile,
     WorkspaceProject,
     WorkspaceSnapshot,
 )
-from src.plugins.builtin.aegis_workspace.sandbox import Sandbox, SandboxConfig
-from src.plugins.builtin.aegis_workspace.schemas import (
+from src.plugins.builtin.aegis_agent.workspace.sandbox import Sandbox, SandboxConfig
+from src.plugins.builtin.aegis_agent.workspace.schemas import (
     ExecutionOut,
     FileOut,
     ProjectCreate,
@@ -52,7 +52,7 @@ from src.plugins.builtin.aegis_workspace.schemas import (
     ProjectUpdate,
     SnapshotOut,
 )
-from src.plugins.builtin.aegis_workspace.git_manager import GitManager
+from src.plugins.builtin.aegis_agent.workspace.git_manager import GitManager
 
 router = APIRouter(prefix="/aegis-workspace", tags=["AegisCode 工作区"])
 
@@ -65,7 +65,7 @@ router = APIRouter(prefix="/aegis-workspace", tags=["AegisCode 工作区"])
 async def create_project(
     body: ProjectCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:create"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:create"))],
 ):
     """创建工作区项目。
 
@@ -124,7 +124,7 @@ async def create_project(
 @router.get("/projects")
 async def list_projects(
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:list"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:list"))],
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     status: str | None = Query(default=None),
@@ -153,7 +153,7 @@ async def list_projects(
 async def get_project(
     project_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:list"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:list"))],
 ):
     """获取项目详情。"""
     project = await db.get(WorkspaceProject, project_id)
@@ -167,7 +167,7 @@ async def update_project(
     project_id: int,
     body: ProjectUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))],
 ):
     """更新项目配置。"""
     project = await db.get(WorkspaceProject, project_id)
@@ -191,7 +191,7 @@ async def update_project(
 async def delete_project(
     project_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:delete"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:delete"))],
 ):
     """删除项目（标记删除，不删磁盘文件）。"""
     project = await db.get(WorkspaceProject, project_id)
@@ -207,7 +207,7 @@ async def delete_project(
 async def get_project_stats(
     project_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:list"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:list"))],
 ):
     """项目统计（右侧项目管理面板）。
 
@@ -283,7 +283,7 @@ async def get_project_stats(
 async def list_files(
     project_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:list"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:list"))],
     path: str = Query(default="."),
     recursive: bool = Query(default=False),
 ):
@@ -297,7 +297,7 @@ async def list_files(
         raise NotFoundException("项目不存在")
 
     if recursive:
-        from src.plugins.builtin.aegis_workspace.sandbox import Sandbox, SandboxConfig
+        from src.plugins.builtin.aegis_agent.workspace.sandbox import Sandbox, SandboxConfig
         sandbox = Sandbox(SandboxConfig(root_path=project.root_path))
         valid, resolved = sandbox.validate_path(path)
         if not valid:
@@ -320,7 +320,7 @@ async def list_files(
         entries.sort(key=lambda e: (e["type"] != "dir", e["path"]))
         return success_response(data={"path": path, "items": entries, "total": len(entries), "recursive": True})
 
-    from src.plugins.builtin.aegis_workspace.tools.file import list_directory
+    from src.plugins.builtin.aegis_agent.workspace.tools.file import list_directory
     result = await list_directory(project.root_path, path)
     return success_response(data=json.loads(result))
 
@@ -329,7 +329,7 @@ async def list_files(
 async def read_file(
     project_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:list"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:list"))],
     path: str = Query(),
 ):
     """读取项目内文件内容。"""
@@ -337,7 +337,7 @@ async def read_file(
     if not project:
         raise NotFoundException("项目不存在")
 
-    from src.plugins.builtin.aegis_workspace.tools.file import read_file as _read
+    from src.plugins.builtin.aegis_agent.workspace.tools.file import read_file as _read
     result = json.loads(await _read(project.root_path, path))
     if "error" in result:
         raise ValidationException(result["error"])
@@ -349,7 +349,7 @@ async def write_file(
     project_id: int,
     body: dict,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))],
 ):
     """写入项目内文件内容。"""
     project = await db.get(WorkspaceProject, project_id)
@@ -361,7 +361,7 @@ async def write_file(
     if not file_path:
         raise ValidationException("文件路径不能为空")
 
-    from src.plugins.builtin.aegis_workspace.tools.file import write_file as _write
+    from src.plugins.builtin.aegis_agent.workspace.tools.file import write_file as _write
     result = json.loads(await _write(project.root_path, file_path, content))
     if "error" in result:
         raise ValidationException(result["error"])
@@ -384,7 +384,7 @@ async def upload_file(
     file: UploadFile = File(...),
     folder: str = Form(default="用户上传"),
     db: Annotated[AsyncSession, Depends(get_db)] = None,
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))] = None,
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))] = None,
 ):
     """上传文件到项目指定文件夹（默认「用户上传」）。
 
@@ -444,7 +444,7 @@ async def upload_file(
 async def delete_project_file(
     project_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))],
     path: str = Query(),
 ):
     """删除项目内文件（沙箱内路径校验；目录仅允许删空目录）。"""
@@ -461,7 +461,7 @@ async def delete_project_file(
     if path.strip() in (".", "", "/"):
         raise ValidationException("非法路径")
 
-    from src.plugins.builtin.aegis_workspace.tools.file import delete_file as _delete
+    from src.plugins.builtin.aegis_agent.workspace.tools.file import delete_file as _delete
     result = json.loads(await _delete(project.root_path, path))
     if "error" in result:
         raise ValidationException(result["error"])
@@ -513,7 +513,7 @@ def _list_real_folders(root_path: str) -> list[dict]:
 async def list_folders(
     project_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:list"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:list"))],
 ):
     """列出项目文件夹（含文件数与排序）。"""
     project = await db.get(WorkspaceProject, project_id)
@@ -539,7 +539,7 @@ async def create_folder(
     project_id: int,
     body: dict,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))],
 ):
     """创建文件夹。请求体: {"name": "新文件夹"}"""
     project = await db.get(WorkspaceProject, project_id)
@@ -572,7 +572,7 @@ async def create_folder(
 async def delete_folder(
     project_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))],
     name: str = Query(),
 ):
     """删除文件夹（仅允许删空文件夹；默认三分类文件夹不可删）。"""
@@ -615,7 +615,7 @@ async def reorder_folders(
     project_id: int,
     body: dict,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))],
 ):
     """文件夹排序。请求体: {"order": ["用户上传", "AI生成文档", "AI编程"]}"""
     project = await db.get(WorkspaceProject, project_id)
@@ -646,7 +646,7 @@ async def execute_command(
     project_id: int,
     body: dict,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:execute"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:execute"))],
 ):
     """在项目沙箱内执行命令。
 
@@ -664,7 +664,7 @@ async def execute_command(
         raise ValidationException("命令不能为空")
 
     # 执行
-    from src.plugins.builtin.aegis_workspace.tools.command import execute_command as _exec
+    from src.plugins.builtin.aegis_agent.workspace.tools.command import execute_command as _exec
     result_json = await _exec(project.root_path, command, cwd, timeout)
     result = json.loads(result_json)
 
@@ -694,7 +694,7 @@ async def execute_command(
 async def create_snapshot(
     project_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:snapshot"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:snapshot"))],
     body: dict | None = None,
 ):
     """创建 Git 快照。
@@ -731,7 +731,7 @@ async def create_snapshot(
 async def list_snapshots(
     project_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:list"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:list"))],
 ):
     """列出项目的 Git 快照。"""
     project = await db.get(WorkspaceProject, project_id)
@@ -749,7 +749,7 @@ async def review_snapshot(
     snapshot_id: int,
     body: dict,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:snapshot"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:snapshot"))],
 ):
     """审阅快照。
 
@@ -774,7 +774,7 @@ async def review_snapshot(
 async def list_executions(
     project_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:list"))],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:list"))],
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ):

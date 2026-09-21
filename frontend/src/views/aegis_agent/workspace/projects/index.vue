@@ -6,7 +6,7 @@
     </div>
 
     <div class="toolbar">
-      <el-button type="primary" @click="openCreate" v-permission="'aegis_workspace:projects:create'">
+      <el-button type="primary" @click="openCreate" v-permission="'aegis_agent:workspace:projects:create'">
         <el-icon><Plus /></el-icon> 创建项目
       </el-button>
       <el-button @click="fetchList" :loading="loading">
@@ -40,10 +40,10 @@
       <el-table-column prop="created_at" label="创建时间" width="170" />
       <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openExecute(row.id)" v-permission="'aegis_workspace:execute'">执行命令</el-button>
-          <el-button link type="success" size="small" @click="openSnapshots(row.id)" v-permission="'aegis_workspace:snapshot'">快照</el-button>
-          <el-button link type="primary" size="small" @click="openMembers(row)" v-permission="'aegis_workspace:members:manage'">成员</el-button>
-          <el-button link type="danger" size="small" @click="handleDelete(row)" v-permission="'aegis_workspace:projects:delete'">删除</el-button>
+          <el-button link type="primary" size="small" @click="openExecute(row.id)" v-permission="'aegis_agent:workspace:execute'">执行命令</el-button>
+          <el-button link type="success" size="small" @click="openSnapshots(row.id)" v-permission="'aegis_agent:workspace:snapshot'">快照</el-button>
+          <el-button link type="primary" size="small" @click="openMembers(row)" v-permission="'aegis_agent:workspace:members:manage'">成员</el-button>
+          <el-button link type="danger" size="small" @click="handleDelete(row)" v-permission="'aegis_agent:workspace:projects:delete'">删除</el-button>
         </template>
       </el-table-column>
     </el-table>

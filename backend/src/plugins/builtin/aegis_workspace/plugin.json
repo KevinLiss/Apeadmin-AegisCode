@@ -1,8 +1,0 @@
-{
-  "name": "aegis_workspace",
-  "display_name": "AegisCode 工作区",
-  "version": "0.1.0",
-  "description": "AegisCode 工作区管理——项目、文件、沙箱执行、Git 快照、工具执行器（file/command/search 四域拆包）",
-  "author": "AegisCode",
-  "dependencies": ["aegis_agent"]
-}
