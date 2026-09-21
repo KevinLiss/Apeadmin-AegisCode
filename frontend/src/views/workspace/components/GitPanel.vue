@@ -25,8 +25,16 @@
           <span class="stat-changed">{{ snap.files_changed }} 个文件变更</span>
         </div>
         <div class="snapshot-actions">
-          <button class="snap-btn" @click="reviewSnapshot(snap, 'approved')">通过</button>
-          <button class="snap-btn" @click="reviewSnapshot(snap, 'rejected')">拒绝</button>
+          <template v-if="snap.reviewed">
+            <span class="snap-status" :class="snap.review_status === 'approved' ? 'approved' : 'rejected'">
+              {{ snap.review_status === 'approved' ? '✓ 已通过' : '✕ 已拒绝' }}
+            </span>
+            <span v-if="snap.review_comment" class="snap-comment">{{ snap.review_comment }}</span>
+          </template>
+          <template v-else>
+            <button class="snap-btn approve" @click="reviewSnapshot(snap, 'approved')">通过</button>
+            <button class="snap-btn reject" @click="reviewSnapshot(snap, 'rejected')">拒绝</button>
+          </template>
         </div>
       </div>
       <div v-if="!loading && snapshots.length === 0" class="empty-state">
@@ -215,15 +223,41 @@ onMounted(() => {
   cursor: pointer;
   transition: all 0.15s;
 }
-.snap-btn:first-child:hover {
+.snap-btn.approve:hover {
   border-color: #22c55e;
   color: #22c55e;
   background: #f0fdf4;
 }
-.snap-btn:last-child:hover {
+.snap-btn.reject:hover {
   border-color: #ef4444;
   color: #ef4444;
   background: #fef2f2;
+}
+
+/* 审核状态徽章 */
+.snap-status {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.snap-status.approved {
+  color: #16a34a;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+}
+.snap-status.rejected {
+  color: #dc2626;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+}
+.snap-comment {
+  font-size: 12px;
+  color: var(--theme-text-secondary, #6b7280);
+  align-self: center;
 }
 .empty-state {
   padding: 24px;
