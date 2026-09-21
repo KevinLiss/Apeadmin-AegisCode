@@ -6,12 +6,9 @@
       <div class="ws-brand-side">
         <div class="brand-content">
           <div class="brand-logo">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-              <path d="M2 17l10 5 10-5"/>
-              <path d="M2 12l10 5 10-5"/>
-            </svg>
-            <span class="brand-logo-text">AegisCode</span>
+            <img v-if="settingsStore.logo_url" :src="settingsStore.logo_url" alt="Logo" class="brand-logo-img" />
+            <img v-else src="/assets/images/logo-icon.png" alt="Logo" class="brand-logo-img" />
+            <span class="brand-logo-text">{{ settingsStore.site_name }}</span>
           </div>
           <h1 class="brand-title">AI 编程工作台</h1>
           <p class="brand-subtitle">让 Agent 替你分析、编码、交付</p>
@@ -30,14 +27,14 @@
             </li>
           </ul>
         </div>
-        <div class="brand-footer">© 2026 AegisCode · Powered by ApeAdmin</div>
+        <div class="brand-footer">© 2026 {{ settingsStore.site_name }} · Powered by ApeAdmin</div>
       </div>
 
       <!-- 右侧登录表单 -->
       <div class="ws-form-side">
         <div class="form-card">
           <h2 class="form-title">欢迎回来</h2>
-          <p class="form-subtitle">登录 AegisCode 工作台，开始你的 AI 编程之旅</p>
+          <p class="form-subtitle">登录 {{ settingsStore.site_name }} 工作台，开始你的 AI 编程之旅</p>
 
           <form @submit.prevent="handleLogin">
             <div class="field" :class="{ 'has-error': errors.username }">
@@ -99,10 +96,12 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElNotification } from 'element-plus'
 import { Verify } from 'vue3-verify'
 import { useUserStore } from '@/stores/user'
+import { useSettingsStore } from '@/stores/settings'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const settingsStore = useSettingsStore()
 
 const loading = ref(false)
 const pwdVisible = ref(false)
@@ -227,6 +226,13 @@ function goAdmin() {
   gap: 10px;
   margin-bottom: 56px;
   color: #a5b4fc;
+}
+
+.brand-logo-img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  border-radius: 8px;
 }
 
 .brand-logo-text {

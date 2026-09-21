@@ -1,13 +1,12 @@
 <template>
   <aside class="project-sidebar">
-    <!-- 品牌区 -->
+    <!-- 品牌区（复用 ApeAdmin 底座 settingsStore） -->
     <div class="sidebar-brand">
       <div class="brand-icon">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-        </svg>
+        <img v-if="settingsStore.logo_url" :src="settingsStore.logo_url" alt="Logo" class="brand-logo-img" />
+        <img v-else src="/assets/images/logo-icon.png" alt="Logo" class="brand-logo-img" />
       </div>
-      <span class="brand-name">AegisCode</span>
+      <span class="brand-name">{{ settingsStore.site_name }}</span>
     </div>
 
     <!-- 新建项目按钮 -->
@@ -280,6 +279,9 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { workspaceApi, agentApi } from '@/api/aegis'
 import { useUserStore } from '@/stores/user'
+import { useSettingsStore } from '@/stores/settings'
+
+const settingsStore = useSettingsStore()
 
 interface Project {
   id: number
@@ -697,6 +699,13 @@ onBeforeUnmount(() => {
   justify-content: center;
   flex-shrink: 0;
 }
+.brand-logo-img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
 .brand-name {
   font-size: 16px;
   font-weight: 700;
