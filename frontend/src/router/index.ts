@@ -42,6 +42,8 @@ const staticRoutes: RouteRecordRaw[] = [
   { path: '/404', name: 'NotFound', component: () => import('@/views/error/404.vue'), meta: { title: '404' } },
   // 工作台 — 独立 Layout，不走底座 ApeSidebar
   { path: '/workspace', name: 'Workspace', component: () => import('@/views/workspace/index.vue'), meta: { title: 'AegisCode 工作台' } },
+  // 工作台独立登录页（与管理后台同一套用户体系）
+  { path: '/workspace/login', name: 'WorkspaceLogin', component: () => import('@/views/workspace/login.vue'), meta: { title: 'AegisCode 登录' } },
   { path: '/', name: 'Layout', component: () => import('@/layout/index.vue'), redirect: '/dashboard-monitor', children: [
     { path: 'profile', name: 'Profile', component: () => import('@/views/system/profile/index.vue'), meta: { title: '个人中心', icon: 'User' } },
   ] },
@@ -58,7 +60,17 @@ function registerDynamicRoutes(menus: any[]) {
 
 router.beforeEach(async (to, _from, next) => {
   const token = localStorage.getItem('apeadmin_token')
+
+  // 工作台登录页：已登录直接进工作台
+  if (to.path === '/workspace/login') { if (token) next('/workspace'); else next(); return }
   if (to.path === '/login') { if (token) next('/dashboard-monitor'); else next(); return }
+
+  // 工作台及其子路由：未登录跳工作台登录页（带 redirect 回跳）
+  if (to.path.startsWith('/workspace') && !token) {
+    next({ path: '/workspace/login', query: { redirect: to.fullPath } })
+    return
+  }
+
   if (!token) { next('/login'); return }
   if (!dynamicRoutesLoaded) {
     const userStore = useUserStore()
@@ -77,7 +89,7 @@ router.beforeEach(async (to, _from, next) => {
 
 export function resetRouter() {
   dynamicRoutesLoaded = false
-  const staticNames = new Set(['Login', 'NotFound', 'CatchAll', 'Layout', 'Profile'])
+  const staticNames = new Set(['Login', 'NotFound', 'CatchAll', 'Layout', 'Profile', 'Workspace', 'WorkspaceLogin'])
   router.getRoutes().forEach((route) => { if (route.name && !staticNames.has(route.name as string)) router.removeRoute(route.name) })
 }
 

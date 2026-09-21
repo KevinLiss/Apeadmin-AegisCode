@@ -37,19 +37,13 @@
         class="message"
         :class="msg.role"
       >
-        <!-- 用户消息 -->
+        <!-- 用户消息：深色气泡右对齐 -->
         <template v-if="msg.role === 'user'">
-          <div class="msg-avatar user">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-          </div>
           <div class="msg-bubble user">{{ msg.content }}</div>
         </template>
 
-        <!-- Assistant 消息 -->
+        <!-- Assistant 消息：无气泡分层展示 -->
         <template v-else-if="msg.role === 'assistant'">
-          <div class="msg-avatar assistant">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
-          </div>
           <div class="msg-content">
             <!-- 深度思考折叠面板 -->
             <div v-if="msg.reasoning_content" class="thinking-card" :class="{ open: msg._thinkingOpen }">
@@ -65,7 +59,7 @@
               </div>
               <div v-if="msg._thinkingOpen" class="thinking-body">{{ msg.reasoning_content }}</div>
             </div>
-            <div class="msg-bubble assistant" v-if="msg.content" v-html="renderContent(msg.content)"></div>
+            <div class="msg-text" v-if="msg.content" v-html="renderContent(msg.content)"></div>
             <div v-if="msg.tool_calls && msg.tool_calls.length" class="tool-calls-list">
               <div v-for="(tc, tci) in msg.tool_calls" :key="tci" class="tool-call-card">
                 <div class="tool-call-header" @click="tc._expanded = !tc._expanded">
@@ -73,7 +67,9 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                   </span>
                   <span class="tool-name">{{ tc.function?.name || 'unknown' }}</span>
-                  <span class="tool-expand">{{ tc._expanded ? '收起' : '展开' }}</span>
+                  <svg class="tool-chevron" :class="{ open: tc._expanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 18 15 12 9 6"/>
+                  </svg>
                 </div>
                 <div v-if="tc._expanded" class="tool-call-body">
                   <pre class="tool-args">{{ formatJson(tc.function?.arguments) }}</pre>
@@ -85,15 +81,14 @@
 
         <!-- 工具执行结果 -->
         <template v-else-if="msg.role === 'tool'">
-          <div class="msg-avatar tool">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-          </div>
           <div class="msg-content">
             <div class="tool-result-card" :class="{ success: msg.tool_success, fail: !msg.tool_success }">
               <div class="tool-result-header" @click="msg._expanded = !msg._expanded">
                 <span class="result-status">{{ msg.tool_success ? '✓' : '✗' }}</span>
                 <span class="result-name">{{ msg.tool_name }}</span>
-                <span class="tool-expand">{{ msg._expanded ? '收起' : '展开' }}</span>
+                <svg class="tool-chevron" :class="{ open: msg._expanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="9 18 15 12 9 6"/>
+                </svg>
               </div>
               <div v-if="msg._expanded" class="tool-result-body">
                 <pre class="tool-output">{{ formatToolResult(msg.tool_result) }}</pre>
@@ -105,9 +100,6 @@
 
       <!-- 流式输出中 -->
       <div v-if="streaming" class="message assistant">
-        <div class="msg-avatar assistant">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/></svg>
-        </div>
         <div class="msg-content">
           <!-- 流式深度思考面板 -->
           <div v-if="streamReasoning" class="thinking-card streaming">
@@ -119,7 +111,7 @@
             </div>
             <div class="thinking-body streaming-preview">{{ streamReasoning.slice(-600) }}</div>
           </div>
-          <div class="msg-bubble assistant streaming" v-if="streamContent" v-html="renderContent(streamContent)"></div>
+          <div class="msg-text streaming" v-if="streamContent" v-html="renderContent(streamContent)"></div>
           <div class="streaming-indicator" v-if="!streamContent && !streamReasoning">
             <span class="dot"></span><span class="dot"></span><span class="dot"></span>
           </div>
@@ -127,57 +119,89 @@
       </div>
     </div>
 
-    <!-- 输入区 -->
+    <!-- 输入区：悬浮圆角容器 -->
     <div class="input-area">
-      <div class="input-wrapper">
-        <!-- 模型选择器 -->
-        <div class="model-selector">
-          <button class="model-trigger" @click.stop="showModelMenu = !showModelMenu">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/>
-            </svg>
-            <span class="model-trigger-name">{{ selectedModelLabel }}</span>
-            <svg class="chev" :class="{ open: showModelMenu }" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </button>
-          <Transition name="menu-fade">
-            <div v-if="showModelMenu" class="model-menu">
-              <div
-                v-for="opt in modelOptions"
-                :key="opt.key"
-                class="model-option"
-                :class="{ active: selectedModel === opt.key }"
-                @click="selectModel(opt.key)"
-              >
-                <div class="model-option-top">
-                  <span class="model-option-name">{{ opt.label }}</span>
-                  <span v-if="opt.key === 'auto'" class="model-tag auto">Auto</span>
-                  <span v-else-if="opt.vision" class="model-tag vision">视觉</span>
-                  <span v-if="selectedModel === opt.key" class="model-check">✓</span>
+      <!-- 技能选择弹窗 -->
+      <Transition name="menu-fade">
+        <div v-if="showSkillMenu" class="skill-menu">
+          <div class="skill-menu-title">选择技能</div>
+          <div class="skill-menu-list">
+            <div
+              v-for="sk in skillOptions"
+              :key="sk.id"
+              class="skill-option"
+              :class="{ active: activeSkill?.id === sk.id }"
+              @click="toggleSkill(sk)"
+            >
+              <span class="skill-option-icon">{{ sk.icon || '⚡' }}</span>
+              <div class="skill-option-info">
+                <div class="skill-option-name">
+                  {{ sk.display_name }}
+                  <span class="skill-check" v-if="activeSkill?.id === sk.id">✓</span>
                 </div>
-                <div class="model-option-desc">{{ opt.desc }}</div>
+                <div class="skill-option-desc">{{ sk.description || '无描述' }}</div>
               </div>
             </div>
-          </Transition>
+            <div v-if="!skillOptions.length && !skillLoading" class="skill-empty">
+              暂无可用技能，可到「技能中心」创建
+            </div>
+            <div v-if="skillLoading" class="skill-empty">加载中...</div>
+          </div>
         </div>
+      </Transition>
+
+      <div class="input-box-wrapper">
+        <!-- 附件按钮（预留） -->
+        <button class="input-icon-btn" title="上传附件（即将上线）" disabled>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+          </svg>
+        </button>
+
+        <!-- 模型选择器 -->
+        <button class="model-chip" @click.stop="showModelMenu = !showModelMenu" :title="selectedModelLabel">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/>
+          </svg>
+          <span class="model-chip-name">{{ selectedModelLabel }}</span>
+          <svg class="chev" :class="{ open: showModelMenu }" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+
+        <!-- 技能按钮 -->
+        <button
+          class="skill-chip"
+          :class="{ active: !!activeSkill }"
+          :title="activeSkill ? `当前技能：${activeSkill.display_name}，点击切换/取消` : '选择技能'"
+          @click.stop="openSkillMenu"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+          <span class="skill-chip-name">{{ activeSkill ? activeSkill.display_name : '技能' }}</span>
+        </button>
+
+        <!-- 输入域 -->
         <textarea
           ref="inputRef"
           v-model="inputText"
-          class="input-box"
-          placeholder="输入你的需求...（Shift+Enter 换行，Enter 发送）"
+          class="input-text"
+          placeholder="输入消息..."
           rows="1"
           @keydown.enter.exact.prevent="sendMessage()"
           @keydown.shift.enter="onShiftEnter"
           @input="autoResize"
         ></textarea>
+
+        <!-- 发送按钮 -->
         <button
           class="send-btn"
           :class="{ stop: streaming }"
           :disabled="!inputText.trim() && !streaming"
           @click="streaming ? controlRun('cancel') : sendMessage()"
         >
-          <svg v-if="!streaming" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg v-if="!streaming" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
           </svg>
           <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -185,6 +209,28 @@
           </svg>
         </button>
       </div>
+
+      <!-- 模型下拉菜单 -->
+      <Transition name="menu-fade">
+        <div v-if="showModelMenu" class="model-menu">
+          <div
+            v-for="opt in modelOptions"
+            :key="opt.key"
+            class="model-option"
+            :class="{ active: selectedModel === opt.key }"
+            @click="selectModel(opt.key)"
+          >
+            <div class="model-option-top">
+              <span class="model-option-name">{{ opt.label }}</span>
+              <span v-if="opt.key === 'auto'" class="model-tag auto">Auto</span>
+              <span v-else-if="opt.vision" class="model-tag vision">视觉</span>
+              <span v-if="selectedModel === opt.key" class="model-check">✓</span>
+            </div>
+            <div class="model-option-desc">{{ opt.desc }}</div>
+          </div>
+        </div>
+      </Transition>
+
       <div class="input-hint" v-if="!runId">首次对话将自动创建会话，标题自动生成</div>
     </div>
   </main>
@@ -193,7 +239,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, watch, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
-import { agentApi, providerApi } from '@/api/aegis'
+import { agentApi, providerApi, skillApi } from '@/api/aegis'
 
 const props = defineProps<{
   project: { id: number; name: string; root_path: string }
@@ -220,6 +266,20 @@ const inputRef = ref<HTMLTextAreaElement | null>(null)
 const modelOptions = ref<any[]>([])
 const showModelMenu = ref(false)
 const selectedModel = ref('auto')
+
+// ── 技能选择器 ──
+interface SkillOption {
+  id: number
+  name: string
+  display_name: string
+  description: string
+  icon: string
+  system_prompt: string
+}
+const skillOptions = ref<SkillOption[]>([])
+const skillLoading = ref(false)
+const showSkillMenu = ref(false)
+const activeSkill = ref<SkillOption | null>(null)
 
 interface ModelMeta {
   key: string
@@ -258,6 +318,36 @@ async function loadModelOptions() {
   } catch {
     modelOptions.value = [autoOpt]
   }
+}
+
+// 拉取可用技能（技能中心已启用 + 已过审）
+async function loadSkillOptions() {
+  skillLoading.value = true
+  try {
+    const res: any = await skillApi.listSkills({ page: 1, page_size: 50, is_active: true })
+    const items = res.items || []
+    skillOptions.value = items.filter(
+      (s: any) => s.review_status === 'approved' || s.skill_type === 'builtin',
+    )
+  } catch {
+    skillOptions.value = []
+  } finally {
+    skillLoading.value = false
+  }
+}
+
+function openSkillMenu() {
+  showSkillMenu.value = !showSkillMenu.value
+  if (showSkillMenu.value && !skillOptions.value.length) loadSkillOptions()
+}
+
+function toggleSkill(sk: SkillOption) {
+  if (activeSkill.value?.id === sk.id) {
+    activeSkill.value = null
+  } else {
+    activeSkill.value = sk
+  }
+  showSkillMenu.value = false
 }
 
 // ── 初始化：按外部指定的会话恢复（含历史），否则新建 ──
@@ -300,15 +390,18 @@ watch(() => props.sessionId ?? null, (newId) => {
   }
 })
 
-// 点击外部关闭模型菜单
-function onClickOutsideModelMenu(e: MouseEvent) {
-  const menu = document.querySelector('.model-selector')
-  if (menu && !menu.contains(e.target as Node)) {
+// 点击外部关闭弹层
+function onClickOutside(e: MouseEvent) {
+  const target = e.target as Node
+  if (showModelMenu.value && !document.querySelector('.model-chip')?.contains(target)) {
     showModelMenu.value = false
   }
+  if (showSkillMenu.value && !document.querySelector('.skill-chip')?.contains(target)) {
+    showSkillMenu.value = false
+  }
 }
-onMounted(() => document.addEventListener('click', onClickOutsideModelMenu))
-onBeforeUnmount(() => document.removeEventListener('click', onClickOutsideModelMenu))
+onMounted(() => document.addEventListener('click', onClickOutside))
+onBeforeUnmount(() => document.removeEventListener('click', onClickOutside))
 
 // ── 加载历史消息 ──
 async function loadHistory() {
@@ -347,7 +440,14 @@ async function sendMessage(presetText?: string) {
   inputText.value = ''
   resetInputHeight()
 
-  // 添加用户消息
+  // 技能激活时拼接技能 prompt 前缀
+  let finalText = text
+  if (activeSkill.value) {
+    const sk = activeSkill.value
+    finalText = `【技能：${sk.display_name}】\n${sk.system_prompt || sk.description || ''}\n\n${text}`
+  }
+
+  // 添加用户消息（原始输入，不含技能前缀）
   messages.value.push({ role: 'user', content: text })
   await scrollToBottom()
 
@@ -377,7 +477,7 @@ async function sendMessage(presetText?: string) {
   streamReasoningDone.value = false
 
   try {
-    const response = await agentApi.sendMessage(runId.value!, text, true) as Response
+    const response = await agentApi.sendMessage(runId.value!, finalText, true) as Response
     if (!response.ok) {
       const errText = await response.text()
       throw new Error(`HTTP ${response.status}: ${errText}`)
@@ -599,7 +699,7 @@ function autoResize() {
   const el = inputRef.value
   if (!el) return
   el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+  el.style.height = Math.min(el.scrollHeight, 140) + 'px'
 }
 
 function resetInputHeight() {
@@ -680,7 +780,7 @@ function onShiftEnter() {
 .messages-container {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 20px 16px;
   scroll-behavior: smooth;
 }
 
@@ -726,57 +826,46 @@ function onShiftEnter() {
 /* ── 消息 ── */
 .message {
   display: flex;
-  gap: 10px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   max-width: 900px;
   margin-left: auto;
   margin-right: auto;
 }
-.msg-avatar {
-  flex-shrink: 0;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.msg-avatar.user {
-  background: var(--el-color-primary, #4f46e5);
-  color: #fff;
-}
-.msg-avatar.assistant {
-  background: #10b981;
-  color: #fff;
-}
-.msg-avatar.tool {
-  background: #f59e0b;
-  color: #fff;
+/* 用户消息：右对齐 */
+.message.user {
+  justify-content: flex-end;
 }
 .msg-content {
   flex: 1;
   min-width: 0;
 }
-.msg-bubble {
-  padding: 10px 14px;
-  border-radius: 10px;
+.msg-bubble.user {
+  max-width: 76%;
+  padding: 10px 16px;
+  border-radius: 14px;
+  border-top-right-radius: 4px;
+  background: #1f2937;
+  color: #fff;
   font-size: 14px;
   line-height: 1.6;
   word-break: break-word;
+  white-space: pre-wrap;
 }
-.msg-bubble.user {
-  background: var(--el-color-primary, #4f46e5);
-  color: #fff;
-}
-.msg-bubble.assistant {
-  background: var(--theme-card-bg, #fff);
-  border: 1px solid var(--theme-border-color, #e5e7eb);
+/* AI 正文：无气泡平铺 */
+.msg-text {
+  font-size: 14px;
+  line-height: 1.7;
   color: var(--theme-text-color, #1f2937);
+  word-break: break-word;
 }
-.msg-bubble.streaming {
-  border-color: #10b981;
+.msg-text.streaming {
+  animation: text-fade 0.3s;
 }
-.msg-bubble :deep(.code-block) {
+@keyframes text-fade {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+.msg-text :deep(.code-block) {
   background: #1e293b;
   color: #e2e8f0;
   padding: 12px;
@@ -786,7 +875,7 @@ function onShiftEnter() {
   overflow-x: auto;
   margin: 8px 0;
 }
-.msg-bubble :deep(.inline-code) {
+.msg-text :deep(.inline-code) {
   background: var(--theme-hover-bg, #f3f4f6);
   padding: 2px 5px;
   border-radius: 4px;
@@ -803,29 +892,32 @@ function onShiftEnter() {
 }
 .tool-call-card {
   border-radius: 8px;
-  border: 1px solid #c7d2fe;
-  background: #eef2ff;
+  border: 1px solid var(--theme-border-color, #e5e7eb);
+  background: var(--theme-hover-bg, #f6f7f9);
   overflow: hidden;
 }
 .tool-call-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 7px 12px;
   cursor: pointer;
   font-size: 13px;
 }
 .tool-icon {
-  color: #4f46e5;
+  color: var(--theme-text-secondary, #6b7280);
 }
 .tool-name {
   font-weight: 500;
-  color: #4338ca;
+  color: var(--theme-text-color, #374151);
   flex: 1;
 }
-.tool-expand {
-  font-size: 11px;
-  color: #818cf8;
+.tool-chevron {
+  color: var(--theme-text-secondary, #9ca3af);
+  transition: transform 0.2s;
+}
+.tool-chevron.open {
+  transform: rotate(90deg);
 }
 .tool-call-body {
   padding: 0 12px 10px;
@@ -833,12 +925,15 @@ function onShiftEnter() {
 .tool-args {
   font-size: 12px;
   font-family: 'Menlo', 'Monaco', monospace;
-  background: #fff;
+  background: var(--theme-card-bg, #fff);
+  border: 1px solid var(--theme-border-color, #e5e7eb);
   padding: 10px;
   border-radius: 6px;
   overflow-x: auto;
   color: #374151;
   margin: 0;
+  max-height: 260px;
+  overflow-y: auto;
 }
 
 /* ── 工具结果卡片 ── */
@@ -848,8 +943,8 @@ function onShiftEnter() {
   border: 1px solid var(--theme-border-color, #e5e7eb);
 }
 .tool-result-card.success {
-  border-color: #bbf7d0;
-  background: #f0fdf4;
+  border-color: #d1fae5;
+  background: #f0fdf9;
 }
 .tool-result-card.fail {
   border-color: #fecaca;
@@ -859,7 +954,7 @@ function onShiftEnter() {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 7px 12px;
   cursor: pointer;
   font-size: 13px;
 }
@@ -886,6 +981,7 @@ function onShiftEnter() {
   font-size: 12px;
   font-family: 'Menlo', 'Monaco', monospace;
   background: var(--theme-card-bg, #fff);
+  border: 1px solid var(--theme-border-color, #e5e7eb);
   padding: 10px;
   border-radius: 6px;
   overflow-x: auto;
@@ -901,13 +997,13 @@ function onShiftEnter() {
 .streaming-indicator {
   display: flex;
   gap: 4px;
-  padding: 12px 14px;
+  padding: 10px 2px;
 }
 .streaming-indicator .dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: #10b981;
+  background: var(--el-color-primary, #4f46e5);
   animation: bounce 1.4s infinite ease-in-out;
 }
 .streaming-indicator .dot:nth-child(2) { animation-delay: 0.2s; }
@@ -920,13 +1016,13 @@ function onShiftEnter() {
 /* ── 深度思考折叠面板 ── */
 .thinking-card {
   border-radius: 10px;
-  border: 1px solid #dde4f0;
-  background: #f6f8fc;
+  border: 1px solid var(--theme-border-color, #e5e7eb);
+  background: var(--theme-hover-bg, #f6f7f9);
   margin-bottom: 8px;
   overflow: hidden;
 }
 .thinking-card.streaming {
-  border-color: #c7d4ea;
+  border-color: var(--theme-border-color, #e5e7eb);
 }
 .thinking-header {
   display: flex;
@@ -937,25 +1033,25 @@ function onShiftEnter() {
   user-select: none;
 }
 .thinking-icon {
-  color: #7c8db5;
+  color: var(--theme-text-secondary, #6b7280);
   flex-shrink: 0;
 }
 .thinking-icon.spinning {
   animation: spin 1s linear infinite;
-  color: #5b6ea8;
+  color: var(--el-color-primary, #4f46e5);
 }
 .thinking-label {
   font-size: 12px;
   font-weight: 500;
-  color: #6b7ca6;
+  color: var(--theme-text-secondary, #6b7280);
 }
 .thinking-status {
   font-size: 11px;
-  color: #93a2c4;
+  color: var(--theme-text-secondary, #9ca3af);
 }
 .thinking-arrow {
   margin-left: auto;
-  color: #93a2c4;
+  color: var(--theme-text-secondary, #9ca3af);
   transition: transform 0.2s;
 }
 .thinking-arrow.open {
@@ -965,7 +1061,7 @@ function onShiftEnter() {
   padding: 4px 14px 10px;
   font-size: 12px;
   line-height: 1.7;
-  color: #8b98b8;
+  color: var(--theme-text-secondary, #6b7280);
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 260px;
@@ -975,45 +1071,179 @@ function onShiftEnter() {
   padding-top: 0;
 }
 
-/* ── 模型选择器 ── */
-.model-selector {
+/* ── 悬浮输入区 ── */
+.input-area {
+  flex-shrink: 0;
   position: relative;
+  padding: 8px 16px 14px;
+  background: transparent;
+}
+.input-box-wrapper {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 900px;
+  margin: 0 auto;
+  background: var(--theme-card-bg, #fff);
+  border: 1px solid var(--theme-border-color, #e5e7eb);
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+  padding: 9px 10px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.input-box-wrapper:focus-within {
+  border-color: var(--el-color-primary-light-5, #a5b4fc);
+  box-shadow: 0 4px 28px rgba(0, 0, 0, 0.1);
+}
+
+/* 左侧图标按钮（附件） */
+.input-icon-btn {
   flex-shrink: 0;
   align-self: flex-end;
-}
-.model-trigger {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: none;
+  background: transparent;
+  color: var(--theme-text-secondary, #9ca3af);
+  cursor: not-allowed;
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 42px;
-  padding: 0 12px;
-  border-radius: 10px;
+  justify-content: center;
+  opacity: 0.55;
+  transition: all 0.15s;
+}
+
+/* 模型 chip */
+.model-chip {
+  flex-shrink: 0;
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 9px;
   border: 1px solid var(--theme-border-color, #e5e7eb);
   background: var(--theme-body-bg, #f9fafb);
   color: var(--theme-text-secondary, #6b7280);
-  font-size: 12.5px;
+  font-size: 12px;
   cursor: pointer;
-  transition: border-color 0.2s;
+  max-width: 160px;
+  transition: all 0.15s;
 }
-.model-trigger:hover {
-  border-color: var(--el-color-primary, #4f46e5);
+.model-chip:hover {
+  border-color: var(--el-color-primary-light-5, #a5b4fc);
+  color: var(--theme-text-color, #1f2937);
 }
-.model-trigger .chev {
+.model-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-chip .chev {
+  flex-shrink: 0;
   transition: transform 0.2s;
 }
-.model-trigger .chev.open {
+.model-chip .chev.open {
   transform: rotate(180deg);
 }
+
+/* 技能 chip */
+.skill-chip {
+  flex-shrink: 0;
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: #f3effe;
+  color: #7c3aed;
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 160px;
+  transition: all 0.15s;
+}
+.skill-chip:hover {
+  background: #ebe4fb;
+}
+.skill-chip.active {
+  background: var(--el-color-primary-light-9, #eef2ff);
+  border-color: var(--el-color-primary-light-5, #a5b4fc);
+  color: var(--el-color-primary, #4f46e5);
+}
+.skill-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 输入域 */
+.input-text {
+  flex: 1;
+  padding: 7px 4px;
+  border: none;
+  background: transparent;
+  color: var(--theme-text-color, #1f2937);
+  font-size: 14px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  min-height: 34px;
+  max-height: 140px;
+  line-height: 1.5;
+}
+.input-text::placeholder {
+  color: var(--theme-text-secondary, #9ca3af);
+}
+
+/* 发送按钮 */
+.send-btn {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: none;
+  background: var(--el-color-primary, #4f46e5);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s, background 0.2s;
+}
+.send-btn:hover {
+  opacity: 0.9;
+}
+.send-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.send-btn.stop {
+  background: #ef4444;
+}
+.input-hint {
+  text-align: center;
+  font-size: 11px;
+  color: var(--theme-text-secondary, #9ca3af);
+  margin-top: 8px;
+}
+
+/* ── 模型下拉菜单 ── */
 .model-menu {
   position: absolute;
-  bottom: 50px;
-  left: 0;
-  width: 300px;
+  bottom: calc(100% - 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 320px;
   max-height: 340px;
   overflow-y: auto;
   background: var(--theme-card-bg, #fff);
   border: 1px solid var(--theme-border-color, #e5e7eb);
-  border-radius: 10px;
+  border-radius: 12px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.13);
   z-index: 100;
   padding: 6px;
@@ -1077,6 +1307,99 @@ function onShiftEnter() {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── 技能选择弹窗 ── */
+.skill-menu {
+  position: absolute;
+  bottom: calc(100% - 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 360px;
+  max-height: 380px;
+  background: var(--theme-card-bg, #fff);
+  border: 1px solid var(--theme-border-color, #e5e7eb);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.13);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.skill-menu-title {
+  padding: 10px 14px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--theme-text-secondary, #6b7280);
+  border-bottom: 1px solid var(--theme-border-color, #f0f0f0);
+}
+.skill-menu-list {
+  overflow-y: auto;
+  padding: 6px;
+}
+.skill-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.skill-option:hover {
+  background: var(--theme-hover-bg, #f3f4f6);
+}
+.skill-option.active {
+  background: var(--el-color-primary-light-9, #eef2ff);
+}
+.skill-option-icon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #f5f3ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+.skill-option-info {
+  flex: 1;
+  min-width: 0;
+}
+.skill-option-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--theme-text-color, #1f2937);
+}
+.skill-option.active .skill-option-name {
+  color: var(--el-color-primary, #4f46e5);
+}
+.skill-check {
+  color: var(--el-color-primary, #4f46e5);
+  font-weight: 700;
+  font-size: 12px;
+}
+.skill-option-desc {
+  font-size: 11px;
+  color: var(--theme-text-secondary, #9ca3af);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.skill-empty {
+  padding: 24px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--theme-text-secondary, #9ca3af);
+}
+
+/* ── 弹层动画 ── */
 .menu-fade-enter-active,
 .menu-fade-leave-active {
   transition: opacity 0.15s, transform 0.15s;
@@ -1084,76 +1407,7 @@ function onShiftEnter() {
 .menu-fade-enter-from,
 .menu-fade-leave-to {
   opacity: 0;
-  transform: translateY(4px);
-}
-
-/* 发送按钮生成中变停止 */
-.send-btn.stop {
-  background: #ef4444;
-}
-
-/* ── 输入区 ── */
-.input-area {
-  flex-shrink: 0;
-  padding: 12px 16px 16px;
-  background: var(--theme-card-bg, #fff);
-  border-top: 1px solid var(--theme-border-color, #e5e7eb);
-}
-.input-wrapper {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  max-width: 900px;
-  margin: 0 auto;
-}
-.input-box {
-  flex: 1;
-  padding: 10px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--theme-border-color, #e5e7eb);
-  background: var(--theme-body-bg, #f9fafb);
-  color: var(--theme-text-color, #1f2937);
-  font-size: 14px;
-  font-family: inherit;
-  resize: none;
-  outline: none;
-  transition: border-color 0.2s;
-  min-height: 42px;
-  max-height: 120px;
-  line-height: 1.5;
-}
-.input-box:focus {
-  border-color: var(--el-color-primary, #4f46e5);
-}
-.input-box::placeholder {
-  color: var(--theme-text-secondary, #9ca3af);
-}
-.send-btn {
-  flex-shrink: 0;
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
-  border: none;
-  background: var(--el-color-primary, #4f46e5);
-  color: #fff;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: opacity 0.2s;
-}
-.send-btn:hover {
-  opacity: 0.9;
-}
-.send-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.input-hint {
-  text-align: center;
-  font-size: 11px;
-  color: var(--theme-text-secondary, #9ca3af);
-  margin-top: 8px;
+  transform: translateX(-50%) translateY(4px);
 }
 
 /* ── 加载动画 ── */
@@ -1162,5 +1416,10 @@ function onShiftEnter() {
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* ── 深色模式适配 ── */
+:global(html.dark) .msg-bubble.user {
+  background: #4b5563;
 }
 </style>

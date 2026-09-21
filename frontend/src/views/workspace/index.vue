@@ -3,37 +3,56 @@
     <!-- 顶部导航栏 -->
     <header class="workspace-header">
       <div class="header-left">
-        <button class="header-btn" @click="goBack" title="返回管理后台">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M19 12H5M12 19l-7-7 7-7"/>
-          </svg>
-        </button>
         <span class="workspace-brand">AegisCode</span>
         <span class="workspace-separator">/</span>
         <span class="workspace-project-name" v-if="currentProject">{{ currentProject.name }}</span>
         <span class="workspace-project-name placeholder" v-else>选择项目</span>
+        <span class="version-badge">v{{ appVersion }}</span>
       </div>
       <div class="header-right">
         <div class="status-indicator" :class="runStatus">
           <span class="status-dot"></span>
           <span class="status-text">{{ statusLabel }}</span>
         </div>
-        <button class="header-btn" @click="togglePanel('files')" :class="{ active: activePanel === 'files' }" title="文件管理">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <button class="header-pill" @click="togglePanel('files')" :class="{ active: activePanel === 'files' }">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
           </svg>
+          <span>文件管理</span>
         </button>
-        <button class="header-btn" @click="togglePanel('project')" :class="{ active: activePanel === 'project' }" title="项目管理">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <button class="header-pill" @click="togglePanel('project')" :class="{ active: activePanel === 'project' }">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7"/><rect x="12" y="6" width="3" height="11"/><rect x="17" y="13" width="3" height="4"/>
           </svg>
+          <span>项目管理</span>
         </button>
-        <button class="header-btn" @click="togglePanel('git')" :class="{ active: activePanel === 'git' }" title="Git 快照">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <button class="header-pill" @click="togglePanel('git')" :class="{ active: activePanel === 'git' }">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/>
             <path d="M13 6h3a2 2 0 0 1 2 2v7M6 9v6"/>
           </svg>
+          <span>Git</span>
         </button>
+
+        <!-- 用户菜单（同后台用户体系） -->
+        <el-dropdown trigger="click" @command="onUserCommand">
+          <button class="header-pill user-pill">
+            <span class="user-avatar">{{ avatarChar }}</span>
+            <span class="user-name">{{ displayName }}</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item disabled>
+                <span class="dropdown-userinfo">{{ userStore.username }}</span>
+              </el-dropdown-item>
+              <el-dropdown-item divided command="admin">返回管理后台</el-dropdown-item>
+              <el-dropdown-item command="logout"><span class="logout-text">退出登录</span></el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </header>
 
@@ -94,8 +113,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessageBox } from 'element-plus'
+import pkg from '../../../package.json'
+import { useUserStore } from '@/stores/user'
 import ProjectSidebar from './components/ProjectSidebar.vue'
 import ChatArea from './components/ChatArea.vue'
 import FilesPanel from './components/FilesPanel.vue'
@@ -103,6 +125,37 @@ import GitPanel from './components/GitPanel.vue'
 import ProjectPanel from './components/ProjectPanel.vue'
 
 const router = useRouter()
+const userStore = useUserStore()
+
+// ── 版本号（package.json，随构建更新） ──
+const appVersion = pkg.version
+
+// ── 用户信息 ──
+const displayName = computed(() => userStore.nickname || userStore.username || '用户')
+const avatarChar = computed(() => displayName.value.charAt(0).toUpperCase())
+
+onMounted(async () => {
+  // 工作台直接进入时（无后台 Layout 预加载），确保用户信息已拉取
+  if (!userStore.username) {
+    try { await userStore.fetchUserInfo() } catch { /* 401 由拦截器处理 */ }
+  }
+})
+
+async function onUserCommand(command: string) {
+  if (command === 'admin') {
+    router.push('/dashboard-monitor')
+  } else if (command === 'logout') {
+    try {
+      await ElMessageBox.confirm('确定退出登录吗？', '提示', {
+        confirmButtonText: '退出',
+        cancelButtonText: '取消',
+        type: 'warning',
+      })
+      await userStore.logout()
+      router.push('/workspace/login')
+    } catch { /* 取消 */ }
+  }
+}
 
 // ── 项目状态 ──
 const currentProjectId = ref<number | null>(null)
@@ -169,10 +222,6 @@ function onSessionCreated(sessionId: number) {
 }
 
 // ChatArea 发送首条消息后会话创建成功，同步侧栏
-
-function goBack() {
-  router.push('/dashboard-monitor')
-}
 </script>
 
 <style scoped>
@@ -213,6 +262,15 @@ function goBack() {
   color: var(--theme-text-color, #1f2937);
   letter-spacing: -0.02em;
 }
+.version-badge {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--theme-text-secondary, #6b7280);
+  background: var(--theme-hover-bg, #f3f4f6);
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
 .workspace-separator {
   color: var(--theme-text-secondary, #9ca3af);
   font-size: 14px;
@@ -229,27 +287,55 @@ function goBack() {
   font-style: italic;
   opacity: 0.6;
 }
-.header-btn {
+.header-pill {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  border: none;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 16px;
+  border: 1px solid var(--theme-border-color, #e5e7eb);
   background: transparent;
   color: var(--theme-text-secondary, #6b7280);
+  font-size: 12.5px;
   cursor: pointer;
   transition: all 0.2s;
 }
-.header-btn:hover {
+.header-pill:hover {
   background: var(--theme-hover-bg, #f3f4f6);
   color: var(--theme-text-color, #1f2937);
+  border-color: var(--el-color-primary-light-5, #a5b4fc);
 }
-.header-btn.active {
+.header-pill.active {
   background: var(--el-color-primary, #4f46e5);
+  border-color: var(--el-color-primary, #4f46e5);
   color: #fff;
 }
+
+/* ── 用户菜单 ── */
+.user-pill { margin-left: 4px; }
+.user-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.user-name {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dropdown-userinfo { color: var(--theme-text-secondary, #6b7280); font-size: 12px; }
+.logout-text { color: var(--el-color-danger, #f56c6c); }
 
 /* ── 状态指示器 ── */
 .status-indicator {

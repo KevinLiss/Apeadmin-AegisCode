@@ -36,10 +36,13 @@ request.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('apeadmin_token')
-      // 如果已在登录页，不跳转也不弹消息，由调用方（如 handleLogin）处理错误提示
+      const isWorkspace = window.location.pathname.includes('/admin/workspace')
+      // 如果已在登录页（后台或工作台），不跳转也不弹消息，由调用方处理错误提示
       if (!window.location.pathname.includes('/login')) {
         ElMessage.error('登录已过期，请重新登录')
-        window.location.href = '/admin/login'
+        window.location.href = isWorkspace
+          ? '/admin/workspace/login'
+          : '/admin/login'
       }
     } else {
       const msg = error.response?.data?.msg || error.message || '网络错误'
