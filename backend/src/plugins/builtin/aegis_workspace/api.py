@@ -10,6 +10,8 @@
 - PUT    /projects/{id}      更新项目
 - DELETE /projects/{id}      删除项目
 - GET    /projects/{id}/files  文件列表
+- GET    /projects/{id}/files/read  读取文件内容
+- POST   /projects/{id}/files/write  写入文件内容
 - POST   /projects/{id}/execute  执行命令
 - POST   /projects/{id}/snapshot  创建快照
 - GET    /projects/{id}/snapshots 快照列表
@@ -19,12 +21,12 @@
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.deps import get_current_user, require_permission
-from src.core.exceptions import NotFoundException, success_response
+from src.core.exceptions import NotFoundException, ValidationException, success_response
 from src.db import get_db
 from src.models import User
 from src.plugins.builtin.aegis_workspace.models import (
@@ -57,31 +59,58 @@ async def create_project(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(require_permission("aegis_workspace:projects:create"))],
 ):
-    """创建工作区项目。"""
+    """创建工作区项目。
+
+    - cloud 模式: 后端自动生成沙盒目录 {CLOUD_STORAGE_DIR}/user{id}_project{id}
+    - local 模式: root_path 留空, 仅存 root_hint 展示名, 真实路径只存桌面端加密 store
+    """
     import os
+    from pathlib import Path
+
+    # 安全: local 模式需要桌面端标识 (预留, Web 端只能创建 cloud)
+    # TODO: 后续加 X-Client-Type header 校验
+
+    # 先创建记录拿到自增 ID
     project = WorkspaceProject(
         user_id=user.id,
         name=body.name,
         description=body.description,
-        root_path=body.root_path,
+        root_path="",  # 延迟填充
+        storage_type=body.storage_type,
+        root_hint=body.root_hint if body.storage_type == "local" else None,
         git_enabled=body.git_enabled,
         sandbox_enabled=body.sandbox_enabled,
         allowed_paths=json.dumps(body.allowed_paths, ensure_ascii=False) if body.allowed_paths else None,
         blocked_commands=json.dumps(body.blocked_commands, ensure_ascii=False) if body.blocked_commands else None,
     )
-    # 确保目录存在
-    os.makedirs(body.root_path, exist_ok=True)
-
     db.add(project)
     await db.commit()
     await db.refresh(project)
 
-    # 如果启用 Git，自动初始化
-    if body.git_enabled:
-        git = GitManager(body.root_path)
-        await git.ensure_repo()
+    if body.storage_type == "cloud":
+        # 云端: 后端自动生成沙盒目录
+        from src.core.config import settings
+        storage_dir = Path(settings.FILE_STORAGE_DIR).parent / "cloud_projects"
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        project_path = storage_dir / f"user{user.id}_project{project.id}"
+        project_path.mkdir(parents=True, exist_ok=True)
 
-    return success_response(data={"id": project.id}, msg="项目已创建")
+        # 创建 3 个默认子目录
+        for subdir in ["AI生成文档", "AI编程", "用户上传"]:
+            (project_path / subdir).mkdir(exist_ok=True)
+
+        project.root_path = str(project_path.resolve())
+
+        # Git 初始化
+        if body.git_enabled:
+            git = GitManager(project.root_path)
+            await git.ensure_repo()
+    # local 模式: root_path 保持空字符串, 真实路径不上传服务器
+
+    await db.commit()
+    await db.refresh(project)
+
+    return success_response(data={"id": project.id, "storage_type": project.storage_type}, msg="项目已创建")
 
 
 @router.get("/projects")
@@ -187,6 +216,49 @@ async def list_files(
     return success_response(data=json.loads(result))
 
 
+@router.get("/projects/{project_id}/files/read")
+async def read_file(
+    project_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:list"))],
+    path: str = Query(),
+):
+    """读取项目内文件内容。"""
+    project = await db.get(WorkspaceProject, project_id)
+    if not project:
+        raise NotFoundException("项目不存在")
+
+    from src.plugins.builtin.aegis_workspace.tools.file import read_file as _read
+    result = json.loads(await _read(project.root_path, path))
+    if "error" in result:
+        raise ValidationException(result["error"])
+    return success_response(data=result)
+
+
+@router.post("/projects/{project_id}/files/write")
+async def write_file(
+    project_id: int,
+    body: dict,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))],
+):
+    """写入项目内文件内容。"""
+    project = await db.get(WorkspaceProject, project_id)
+    if not project:
+        raise NotFoundException("项目不存在")
+
+    file_path = body.get("path", "")
+    content = body.get("content", "")
+    if not file_path:
+        raise ValidationException("文件路径不能为空")
+
+    from src.plugins.builtin.aegis_workspace.tools.file import write_file as _write
+    result = json.loads(await _write(project.root_path, file_path, content))
+    if "error" in result:
+        raise ValidationException(result["error"])
+    return success_response(data=result, msg="文件已保存")
+
+
 # ---------------------------------------------------------------------------
 # 命令执行
 # ---------------------------------------------------------------------------
@@ -211,7 +283,7 @@ async def execute_command(
     timeout = body.get("timeout", 60)
 
     if not command:
-        raise HTTPException(status_code=400, detail="命令不能为空")
+        raise ValidationException("命令不能为空")
 
     # 执行
     from src.plugins.builtin.aegis_workspace.tools.command import execute_command as _exec
@@ -243,9 +315,9 @@ async def execute_command(
 @router.post("/projects/{project_id}/snapshot")
 async def create_snapshot(
     project_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("aegis_workspace:snapshot"))],
     body: dict | None = None,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
-    user: Annotated[User, Depends(require_permission("aegis_workspace:snapshot"))] = None,
 ):
     """创建 Git 快照。
 
@@ -256,7 +328,7 @@ async def create_snapshot(
         raise NotFoundException("项目不存在")
 
     if not project.git_enabled:
-        raise HTTPException(status_code=400, detail="项目未启用 Git")
+        raise ValidationException("项目未启用 Git")
 
     body = body or {}
     git = GitManager(project.root_path)

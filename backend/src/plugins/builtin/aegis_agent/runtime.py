@@ -25,7 +25,7 @@ from typing import Any, Callable
 
 import httpx
 from loguru import logger
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 
 from src.core.crypto import decrypt_api_key
 from src.db import SessionLocal
@@ -52,6 +52,7 @@ from src.plugins.builtin.aegis_agent.models import (
     AgentEvent,
     AgentCheckpoint,
 )
+from src.plugins.builtin.aegis_agent.security_models import ApiCallLog
 
 
 # ---------------------------------------------------------------------------
@@ -306,13 +307,32 @@ class AgentRuntime:
         if not active:
             raise ValueError(f"Run {run_id} not found or not active")
 
-        # 更新状态
+        # 用户 Token 限额检查
         async with SessionLocal() as db:
             run = await db.get(AgentRun, run_id)
             if not run:
                 raise ValueError(f"Run {run_id} not found")
             if run.status not in (RunState.created.value, RunState.running.value, RunState.paused.value):
                 raise ValueError(f"Run {run_id} is {run.status}, cannot send message")
+
+            # 查用户 token_limit
+            user = await db.get(User, run.user_id)
+            if user and user.token_limit > 0:
+                # 查当日已用 Token
+                from datetime import datetime as _dt
+                today_start = _dt.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                stmt = (
+                    select(func.sum(ApiCallLog.total_tokens))
+                    .where(ApiCallLog.user_id == run.user_id)
+                    .where(ApiCallLog.created_at >= today_start)
+                )
+                used_today = (await db.execute(stmt)).scalar() or 0
+                if used_today >= user.token_limit:
+                    raise ValueError(
+                        f"今日 Token 用量已达限额 ({used_today}/{user.token_limit})，"
+                        f"请明天再试或联系管理员调整限额"
+                    )
+
             run.status = RunState.running.value
             await db.commit()
 
@@ -513,6 +533,8 @@ class AgentRuntime:
                     model=model_name,
                     provider=provider.provider_type,
                 )
+                # 用 model_details 中的价格重新计算成本（覆盖硬编码 pricing 表）
+                self._apply_model_pricing(usage, provider, model_name)
                 usage.latency_ms = int((time.time() - step_start) * 1000)
 
                 # 记录用量
@@ -700,6 +722,8 @@ class AgentRuntime:
                     model=model_name,
                     provider=provider.provider_type,
                 )
+                # 用 model_details 中的价格重新计算成本（覆盖硬编码 pricing 表）
+                self._apply_model_pricing(usage, provider, model_name)
                 usage.latency_ms = int((time.time() - step_start) * 1000)
                 if first_token_time is not None:
                     usage.first_token_ms = int((first_token_time - step_start) * 1000)
@@ -841,6 +865,11 @@ class AgentRuntime:
             run = await db.get(AgentRun, active.run_id)
             model = run.model_name if run and run.model_name else "deepseek-chat"
 
+        # 从 model_details 获取模型参数，回退到默认值
+        md = self._get_model_detail(provider, model)
+        max_tokens = md.get("max_tokens", 4096)
+        temperature = md.get("temperature", 0.7)
+
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -848,19 +877,20 @@ class AgentRuntime:
         body = {
             "model": model,
             "messages": messages,
-            "max_tokens": 4000,
-            "temperature": 0.7,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
             "stream": False,
         }
 
-        # 添加可用工具
-        tools = self._get_available_tools()
-        if tools:
-            body["tools"] = tools
-            body["tool_choice"] = "auto"
+        # 添加可用工具（如果模型不支持工具调用则跳过）
+        if md.get("supports_tools", True):
+            tools = self._get_available_tools()
+            if tools:
+                body["tools"] = tools
+                body["tool_choice"] = "auto"
 
         url = f"{base_url.rstrip('/')}/chat/completions"
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
             resp = await client.post(url, headers=headers, json=body)
             if resp.status_code >= 400:
                 raise RuntimeError(f"LLM API 错误 {resp.status_code}: {resp.text[:300]}")
@@ -875,6 +905,11 @@ class AgentRuntime:
         active: _ActiveRun,
     ) -> AsyncGenerator[str, None]:
         """流式 LLM 调用。"""
+        provider = await self._get_provider(active.run_id)
+        md = self._get_model_detail(provider, model)
+        max_tokens = md.get("max_tokens", 4096)
+        temperature = md.get("temperature", 0.7)
+
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -882,20 +917,22 @@ class AgentRuntime:
         body: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "max_tokens": 4000,
-            "temperature": 0.7,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
             "stream": True,
             # OpenAI 兼容: 让最后一个 chunk 携带精确 usage（token 精确计量的关键）
             "stream_options": {"include_usage": True},
         }
 
-        tools = self._get_available_tools()
-        if tools:
-            body["tools"] = tools
-            body["tool_choice"] = "auto"
+        # 添加可用工具（如果模型不支持工具调用则跳过）
+        if md.get("supports_tools", True):
+            tools = self._get_available_tools()
+            if tools:
+                body["tools"] = tools
+                body["tool_choice"] = "auto"
 
         url = f"{base_url.rstrip('/')}/chat/completions"
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
             request = client.build_request("POST", url, headers=headers, json=body)
             resp = await client.send(request, stream=True)
             if resp.status_code in (400, 404, 422) and "stream_options" in body:
@@ -998,7 +1035,7 @@ class AgentRuntime:
         usage: UsageRecord,
         budget_status: dict,
     ) -> None:
-        """持久化用量日志。"""
+        """持久化用量日志 + API 调用日志。"""
         async with SessionLocal() as db:
             log = AgentUsageLog(
                 run_id=run_id,
@@ -1019,6 +1056,29 @@ class AgentRuntime:
                 budget_usage_pct=Decimal(str(budget_status.get("usage_pct", 0))),
             )
             db.add(log)
+
+            # 同时写入安全中心 API 调用日志
+            run = await db.get(AgentRun, run_id)
+            if run:
+                total = usage.input_tokens + usage.output_tokens + usage.cache_read_tokens + usage.cache_write_tokens + usage.reasoning_tokens
+                call_log = ApiCallLog(
+                    user_id=run.user_id,
+                    run_id=run_id,
+                    step_id=step_id,
+                    model=usage.model or "",
+                    provider=usage.provider or "",
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                    cache_read_tokens=usage.cache_read_tokens,
+                    cache_write_tokens=usage.cache_write_tokens,
+                    reasoning_tokens=usage.reasoning_tokens,
+                    total_tokens=total,
+                    cost_usd=str(usage.cost_usd),
+                    latency_ms=usage.latency_ms,
+                    workspace_id=run.workspace_id,
+                )
+                db.add(call_log)
+
             await db.commit()
 
     async def _finalize_run(self, active: _ActiveRun, final_content: str) -> None:
@@ -1071,6 +1131,28 @@ class AgentRuntime:
         defaults = PROVIDER_DEFAULTS.get(provider.provider_type, PROVIDER_DEFAULTS["custom"])
         base_url = provider.base_url or defaults["base_url"]
         return {"base_url": base_url, "default_model": defaults["default_model"]}
+
+    def _get_model_detail(self, provider: AiProvider | None, model_name: str) -> dict[str, Any]:
+        """从 provider.model_details 获取指定模型的元数据，找不到则返回空 dict。"""
+        if not provider:
+            return {}
+        try:
+            details = json.loads(provider.model_details) if provider.model_details else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return details.get(model_name, {})
+
+    def _apply_model_pricing(self, usage: UsageRecord, provider: AiProvider | None, model_name: str) -> None:
+        """如果 model_details 中配置了价格，则覆盖 UsageRecord.cost_usd。"""
+        md = self._get_model_detail(provider, model_name)
+        input_price = md.get("input_price_per_million")
+        output_price = md.get("output_price_per_million")
+        if input_price is not None and output_price is not None:
+            cost = (
+                Decimal(input_price) * Decimal(usage.input_tokens) / Decimal(1_000_000)
+                + Decimal(output_price) * Decimal(usage.output_tokens) / Decimal(1_000_000)
+            )
+            usage.cost_usd = cost.quantize(Decimal("0.000001"))
 
 
 # ---------------------------------------------------------------------------

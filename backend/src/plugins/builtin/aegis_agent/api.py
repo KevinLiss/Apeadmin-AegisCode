@@ -286,6 +286,85 @@ async def list_steps(
     return success_response(data=[StepOut.model_validate(item) for item in items])
 
 
+@router.get("/runs/{run_id}/messages")
+async def list_messages(
+    run_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("aegis_agent:runs:detail"))],
+):
+    """将会话步骤还原为聊天消息序列（供工作台对话区渲染历史）。
+
+    每条消息: {role, content, tool_calls?, tool_result?, step_index, created_at}
+    - user 消息从 input_messages 中提取
+    - assistant 消息取 output_content + tool_calls_json
+    - tool 消息取 tool_name + tool_result
+    """
+    run = await db.get(AgentRun, run_id)
+    if not run:
+        raise NotFoundException("运行不存在")
+
+    stmt = (
+        select(AgentStep)
+        .where(AgentStep.run_id == run_id)
+        .order_by(AgentStep.step_index.asc(), AgentStep.id.asc())
+    )
+    steps = (await db.execute(stmt)).scalars().all()
+
+    messages: list[dict] = []
+    for s in steps:
+        # 用户消息（从 input_messages 中提取最后一条 user 消息）
+        if s.step_type == "llm_call" and s.input_messages:
+            try:
+                input_list = json.loads(s.input_messages) if isinstance(s.input_messages, str) else s.input_messages
+                for msg in input_list:
+                    if isinstance(msg, dict) and msg.get("role") == "user":
+                        messages.append({
+                            "role": "user",
+                            "content": msg.get("content", ""),
+                            "step_index": s.step_index,
+                            "created_at": s.created_at.isoformat() if s.created_at else None,
+                        })
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Assistant 输出
+        if s.step_type == "llm_call" and s.output_content:
+            tool_calls = None
+            if s.tool_calls_json:
+                try:
+                    tool_calls = json.loads(s.tool_calls_json) if isinstance(s.tool_calls_json, str) else s.tool_calls_json
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            messages.append({
+                "role": "assistant",
+                "content": s.output_content,
+                "tool_calls": tool_calls,
+                "role_label": s.role,
+                "step_index": s.step_index,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+            })
+
+        # 工具执行结果
+        if s.step_type == "tool_result" and s.tool_name:
+            result = None
+            if s.tool_result:
+                try:
+                    result = json.loads(s.tool_result) if isinstance(s.tool_result, str) else s.tool_result
+                except (json.JSONDecodeError, TypeError):
+                    result = s.tool_result
+            messages.append({
+                "role": "tool",
+                "tool_name": s.tool_name,
+                "tool_args": json.loads(s.tool_args) if s.tool_args else None,
+                "tool_result": result,
+                "tool_success": s.tool_success,
+                "step_index": s.step_index,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+            })
+
+    return success_response(data={"run_id": run_id, "status": run.status, "messages": messages})
+
+
 @router.get("/runs/{run_id}/usage")
 async def list_usage_logs(
     run_id: int,

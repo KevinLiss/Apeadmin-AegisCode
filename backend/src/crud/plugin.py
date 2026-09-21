@@ -44,8 +44,8 @@ class CRUDPlugin(CRUDBase[Plugin]):
             await db.refresh(existing)
             return existing
         else:
-            # New plugin: default enabled=False
-            db_obj = Plugin(name=name, **data)
+            # New plugin: auto-enable built-in plugins on first discovery
+            db_obj = Plugin(name=name, enabled=True, **data)
             db.add(db_obj)
             await db.commit()
             await db.refresh(db_obj)

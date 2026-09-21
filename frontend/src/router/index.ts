@@ -40,6 +40,8 @@ export function generateDynamicRoutes(menus: any[]): RouteRecordRaw[] {
 const staticRoutes: RouteRecordRaw[] = [
   { path: '/login', name: 'Login', component: () => import('@/views/login/index.vue'), meta: { title: '登录' } },
   { path: '/404', name: 'NotFound', component: () => import('@/views/error/404.vue'), meta: { title: '404' } },
+  // 工作台 — 独立 Layout，不走底座 ApeSidebar
+  { path: '/workspace', name: 'Workspace', component: () => import('@/views/workspace/index.vue'), meta: { title: 'AegisCode 工作台' } },
   { path: '/', name: 'Layout', component: () => import('@/layout/index.vue'), redirect: '/dashboard-monitor', children: [
     { path: 'profile', name: 'Profile', component: () => import('@/views/system/profile/index.vue'), meta: { title: '个人中心', icon: 'User' } },
   ] },

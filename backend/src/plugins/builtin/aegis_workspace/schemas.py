@@ -7,11 +7,17 @@ from pydantic import BaseModel, ConfigDict, Field
 class ProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = None
-    root_path: str = Field(..., min_length=1, max_length=500)
+    storage_type: str = Field(default="cloud", pattern="^(cloud|local)$")
+    # root_path 仅 local 模式由桌面端传入展示名, cloud 模式后端自动生成
+    root_hint: str | None = None
     git_enabled: bool = True
     sandbox_enabled: bool = True
     allowed_paths: list[str] | None = None
     blocked_commands: list[str] | None = None
+    # 本地模式设备信息(桌面端)
+    device_id: str | None = None
+    device_name: str | None = None
+    device_platform: str | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -30,7 +36,9 @@ class ProjectOut(BaseModel):
     user_id: int
     name: str
     description: str | None = None
-    root_path: str
+    storage_type: str = "cloud"
+    root_path: str = ""
+    root_hint: str | None = None
     git_enabled: bool
     git_branch: str
     sandbox_enabled: bool

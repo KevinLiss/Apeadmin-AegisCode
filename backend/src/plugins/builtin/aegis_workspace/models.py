@@ -33,9 +33,21 @@ class WorkspaceProject(IDMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False, comment="项目名")
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # 文件系统
+    # 存储模式: cloud=云端沙盒(后端自动生成路径), local=本地文件夹(桌面端绑定)
+    storage_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="cloud",
+        comment="cloud/local",
+    )
+
+    # 文件系统: 云端=服务器绝对路径(后端自动生成), local=空字符串(真实路径只存桌面端加密 store)
     root_path: Mapped[str] = mapped_column(
-        String(500), nullable=False, comment="项目根目录（绝对路径）"
+        String(500), nullable=False, default="",
+        comment="云端=服务器绝对路径, 本地=空",
+    )
+
+    # 本地模式仅存展示名(文件夹名), 不存真实路径
+    root_hint: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True, comment="本地模式: 文件夹展示名"
     )
 
     # Git

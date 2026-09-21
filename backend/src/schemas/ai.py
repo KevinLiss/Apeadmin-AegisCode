@@ -13,11 +13,23 @@ from pydantic import BaseModel, ConfigDict, Field
 ORMConfig = ConfigDict(from_attributes=True)
 
 
+class ModelDetail(BaseModel):
+    """单个模型的详细元数据。"""
+    display_name: str | None = None
+    supports_vision: bool = False
+    supports_tools: bool = True
+    max_tokens: int = 4096
+    temperature: float = 0.7
+    input_price_per_million: float = 0.0
+    output_price_per_million: float = 0.0
+
+
 class ProviderBase(BaseModel):
     name: str = Field(..., max_length=100)
     provider_type: str = Field(..., max_length=50, description="deepseek/qwen/glm/openai/custom")
     base_url: str = ""
     models: list[str] = Field(default_factory=list)
+    model_details: dict[str, ModelDetail] = Field(default_factory=dict, description="按模型名存储元数据")
     enabled: int = 1
     sort: int = 0
     remark: str | None = None
@@ -32,6 +44,7 @@ class ProviderUpdate(BaseModel):
     provider_type: str | None = None
     base_url: str | None = None
     models: list[str] | None = None
+    model_details: dict[str, ModelDetail] | None = None
     api_key: str | None = None  # 可选，不传则不修改
     enabled: int | None = None
     sort: int | None = None
@@ -45,6 +58,7 @@ class ProviderOut(BaseModel):
     provider_type: str
     base_url: str
     models: list[str] = Field(default_factory=list)
+    model_details: dict[str, Any] = Field(default_factory=dict)
     enabled: int
     sort: int
     remark: str | None = None

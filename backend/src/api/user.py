@@ -52,6 +52,7 @@ async def list_users(
                     "phone": u.phone,
                     "dept_id": u.dept_id,
                     "status": u.status,
+                    "token_limit": u.token_limit,
                     "created_at": u.created_at.isoformat() if u.created_at else None,
                     "roles": [{"id": r.id, "name": r.name, "code": r.code} for r in u.roles],
                     "dept": {"id": u.dept.id, "name": u.dept.name} if u.dept else None,
@@ -99,6 +100,7 @@ async def get_user(
             "phone": u.phone,
             "dept_id": u.dept_id,
             "status": u.status,
+            "token_limit": u.token_limit,
             "avatar": u.avatar,
             "roles": [{"id": r.id, "name": r.name, "code": r.code} for r in u.roles],
         }

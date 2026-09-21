@@ -19,22 +19,22 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: '127.0.0.1',
-      port: 5173,
+      port: 5174,
       proxy: {
         '/api': {
-          target: env.VITE_API_PROXY_TARGET || 'http://localhost:8000',
+          target: env.VITE_API_PROXY_TARGET || 'http://localhost:8010',
           changeOrigin: true,
         },
         '/uploads': {
-          target: env.VITE_API_PROXY_TARGET || 'http://localhost:8000',
+          target: env.VITE_API_PROXY_TARGET || 'http://localhost:8010',
           changeOrigin: true,
         },
         '/media': {
-          target: env.VITE_API_PROXY_TARGET || 'http://localhost:8000',
+          target: env.VITE_API_PROXY_TARGET || 'http://localhost:8010',
           changeOrigin: true,
         },
         '/apehub-web': {
-          target: env.VITE_API_PROXY_TARGET || 'http://localhost:8000',
+          target: env.VITE_API_PROXY_TARGET || 'http://localhost:8010',
           changeOrigin: true,
         },
       },

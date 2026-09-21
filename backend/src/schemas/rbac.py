@@ -53,6 +53,7 @@ class UserBase(BaseModel):
     phone: str | None = None
     dept_id: int | None = None
     status: int = 1
+    token_limit: int = Field(default=0, ge=0, description="每日Token限额(0=不限)")
 
 
 class UserCreate(UserBase):
@@ -66,6 +67,7 @@ class UserUpdate(BaseModel):
     phone: str | None = None
     dept_id: int | None = None
     status: int | None = None
+    token_limit: int | None = Field(default=None, ge=0, description="每日Token限额(0=不限)")
     role_ids: list[int] | None = None
 
 

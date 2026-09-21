@@ -53,8 +53,18 @@ async def seed_aegis_agent_data(db: AsyncSession) -> None:
         ("控制运行", "Agent 运行", "F", None, None, "aegis_agent:runs:control", None, 2, 1),
         ("删除运行", "Agent 运行", "F", None, None, "aegis_agent:runs:delete", None, 3, 1),
         ("用量统计", "AegisCode", "C", "usage", "aegis_agent/usage/index", "aegis_agent:usage:list", "DataLine", 2, 1),
+        # 安全中心
+        ("安全中心", "AegisCode", "C", "security", "aegis_agent/security/index", "aegis_security:token-stats", "Lock", 3, 1),
+        ("查看调用日志", "安全中心", "F", None, None, "aegis_security:call-logs", None, 1, 1),
+        ("查看操作日志", "安全中心", "F", None, None, "aegis_security:action-logs", None, 2, 1),
+        ("管理脱敏规则", "安全中心", "F", None, None, "aegis_security:sanitize-rules", None, 3, 1),
+        # 预算策略
+        ("预算策略", "AegisCode", "C", "budget", "aegis_agent/budget/index", "aegis_budget:list", "Wallet", 5, 1),
+        ("创建策略", "预算策略", "F", None, None, "aegis_budget:add", None, 1, 1),
+        ("编辑策略", "预算策略", "F", None, None, "aegis_budget:edit", None, 2, 1),
+        ("删除策略", "预算策略", "F", None, None, "aegis_budget:delete", None, 3, 1),
         # 运行详情为隐藏路由页（visible=0: 不出现在侧边栏，但动态路由正常注册）
-        ("运行详情", "AegisCode", "C", "runs/:id", "aegis_agent/runs/detail", "aegis_agent:runs:detail", "View", 3, 0),
+        ("运行详情", "AegisCode", "C", "runs/:id", "aegis_agent/runs/detail", "aegis_agent:runs:detail", "View", 4, 0),
     ]
 
     existing = list((await db.execute(select(Menu))).scalars().all())

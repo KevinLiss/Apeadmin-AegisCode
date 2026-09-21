@@ -16,6 +16,14 @@ from src.plugins.builtin.aegis_agent.models import (  # noqa: F401 — register 
     AgentStep,
     AgentUsageLog,
 )
+from src.plugins.builtin.aegis_agent.security_models import (  # noqa: F401
+    ApiCallLog,
+    UserActionLog,
+    SanitizeRule,
+)
+from src.plugins.builtin.aegis_agent.budget_policy_models import (  # noqa: F401
+    AgentBudgetPolicy,
+)
 from src.plugins.builtin.aegis_agent.seed import seed_aegis_agent_data
 
 
@@ -55,6 +63,10 @@ class AegisAgentPlugin(PluginInterface):
                         AgentUsageLog.__table__,
                         AgentEvent.__table__,
                         AgentCheckpoint.__table__,
+                        ApiCallLog.__table__,
+                        UserActionLog.__table__,
+                        SanitizeRule.__table__,
+                        AgentBudgetPolicy.__table__,
                     ],
                 )
             )
@@ -73,6 +85,9 @@ class AegisAgentPlugin(PluginInterface):
                     lambda sync_conn: Base.metadata.drop_all(
                         sync_conn,
                         tables=[
+                            SanitizeRule.__table__,
+                            UserActionLog.__table__,
+                            ApiCallLog.__table__,
                             AgentCheckpoint.__table__,
                             AgentEvent.__table__,
                             AgentUsageLog.__table__,
@@ -95,8 +110,12 @@ class AegisAgentPlugin(PluginInterface):
     def register(self, app: FastAPI) -> None:
         """注册路由。"""
         from src.plugins.builtin.aegis_agent.api import router
+        from src.plugins.builtin.aegis_agent.security_api import router as security_router
+        from src.plugins.builtin.aegis_agent.budget_policy_api import router as budget_router
 
         app.include_router(router, prefix=settings.API_PREFIX)
+        app.include_router(security_router, prefix=settings.API_PREFIX)
+        app.include_router(budget_router, prefix=settings.API_PREFIX)
 
         # 订阅事件（示例：日志记录）
         event_bus.on(

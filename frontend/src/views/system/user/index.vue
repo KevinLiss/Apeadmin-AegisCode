@@ -38,6 +38,13 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="Token限额" width="110">
+        <template #default="{ row }">
+          <el-tag :type="row.token_limit > 0 ? 'warning' : 'info'" size="small">
+            {{ row.token_limit > 0 ? row.token_limit.toLocaleString() : '不限' }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="created_at" label="创建时间" width="170">
         <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
       </el-table-column>
@@ -85,6 +92,10 @@
       <el-form-item label="状态">
         <el-switch v-model="form.status" :active-value="1" :inactive-value="0" />
       </el-form-item>
+      <el-form-item label="Token限额">
+        <el-input-number v-model="form.token_limit" :min="0" :step="10000" :step-strictly="false" placeholder="0表示不限" style="width: 100%" />
+        <div class="form-tip">每日 Token 用量上限，0 = 不限制</div>
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="dialogVisible = false">取消</el-button>
@@ -106,6 +117,7 @@ interface UserRow {
   dept?: { id: number; name: string }
   roles: { id: number; name: string }[]
   status: number
+  token_limit: number
   created_at: string
 }
 
@@ -125,6 +137,7 @@ const form = reactive({
   password: '',
   role_ids: [] as number[],
   status: 1,
+  token_limit: 0,
 })
 
 const rules: FormRules = {
@@ -163,6 +176,7 @@ function openDialog(row?: UserRow) {
   form.password = ''
   form.role_ids = row?.roles?.map((r) => r.id) ?? []
   form.status = row?.status ?? 1
+  form.token_limit = row?.token_limit ?? 0
   dialogVisible.value = true
 }
 
@@ -177,6 +191,7 @@ async function handleSave() {
           nickname: form.nickname,
           status: form.status,
           role_ids: form.role_ids,
+          token_limit: form.token_limit,
         })
         ElMessage.success('更新成功')
       } else {
@@ -186,6 +201,7 @@ async function handleSave() {
           password: form.password,
           role_ids: form.role_ids,
           status: form.status,
+          token_limit: form.token_limit,
         })
         ElMessage.success('创建成功')
       }
@@ -230,5 +246,10 @@ onMounted(() => {
 .pagination {
   margin-top: 14px;
   justify-content: flex-end;
+}
+.form-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.4;
 }
 </style>

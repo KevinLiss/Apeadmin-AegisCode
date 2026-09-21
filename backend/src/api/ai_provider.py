@@ -26,6 +26,10 @@ def _provider_to_dict(p: AiProvider) -> dict:
     except (json.JSONDecodeError, TypeError):
         models_list = []
     try:
+        details = json.loads(p.model_details) if p.model_details else {}
+    except (json.JSONDecodeError, TypeError):
+        details = {}
+    try:
         masked = mask_api_key(decrypt_api_key(p.api_key_enc))
     except Exception:
         masked = "****"
@@ -35,6 +39,7 @@ def _provider_to_dict(p: AiProvider) -> dict:
         "provider_type": p.provider_type,
         "base_url": p.base_url,
         "models": models_list,
+        "model_details": details,
         "enabled": p.enabled,
         "sort": p.sort,
         "remark": p.remark,
@@ -87,6 +92,10 @@ async def create_provider(
         "api_key_enc": encrypt_api_key(body.api_key),
         "base_url": body.base_url,
         "models": json.dumps(body.models, ensure_ascii=False),
+        "model_details": json.dumps(
+            {k: v.model_dump() for k, v in body.model_details.items()},
+            ensure_ascii=False,
+        ),
         "enabled": body.enabled,
         "sort": body.sort,
         "remark": body.remark,
@@ -115,6 +124,11 @@ async def update_provider(
         update_data["base_url"] = body.base_url
     if body.models is not None:
         update_data["models"] = json.dumps(body.models, ensure_ascii=False)
+    if body.model_details is not None:
+        update_data["model_details"] = json.dumps(
+            {k: v.model_dump() for k, v in body.model_details.items()},
+            ensure_ascii=False,
+        )
     if body.enabled is not None:
         update_data["enabled"] = body.enabled
     if body.sort is not None:
@@ -161,7 +175,7 @@ async def test_provider(
     base_url = provider.base_url or "https://api.deepseek.com"
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
             resp = await client.get(
                 f"{base_url.rstrip('/')}/models",
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -170,7 +184,7 @@ async def test_provider(
             data = resp.json()
             models = [m.get("id", "") for m in data.get("data", [])]
             return success_response(data={"ok": True, "models": models}, msg="连通成功")
-    except httpx.HTTPStatusError as e:
-        return success_response(data={"ok": False, "error": f"HTTP {e.response.status_code}"}, msg="连通失败")
+    except httpx.HTTPError as e:
+        return success_response(data={"ok": False, "error": str(e)}, msg="连通失败")
     except Exception as e:
         return success_response(data={"ok": False, "error": str(e)}, msg="连通失败")

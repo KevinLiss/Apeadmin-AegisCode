@@ -154,6 +154,9 @@ class User(IDMixin, TimestampMixin, SoftDeleteMixin, Base):
     last_login_ip: Mapped[Optional[str]] = mapped_column(
         String(50), nullable=True, comment="最后登录IP"
     )
+    token_limit: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="每日Token限额(0=不限)"
+    )
 
     dept: Mapped[Optional["Dept"]] = relationship("Dept", lazy="selectin")
     roles: Mapped[list["Role"]] = relationship(

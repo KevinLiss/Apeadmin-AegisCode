@@ -28,6 +28,9 @@ class AiProvider(IDMixin, TimestampMixin, Base):
     models: Mapped[str] = mapped_column(
         Text, nullable=False, default="[]", comment="支持的模型列表(JSON数组)"
     )
+    model_details: Mapped[str] = mapped_column(
+        Text, nullable=False, default="{}", comment="模型元数据(JSON: {model_name: {supports_vision, supports_tools, max_tokens, temperature, input_price_per_million, output_price_per_million, display_name}})"
+    )
     enabled: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, comment="是否启用: 0=禁用 1=启用"
     )
