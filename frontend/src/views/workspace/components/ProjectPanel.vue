@@ -111,7 +111,7 @@
         </div>
         <div class="member-list" v-loading="membersLoading">
           <div v-for="m in members" :key="m.user_id" class="member-item">
-            <span class="member-avatar" :class="{ owner: m.role === 'owner' }">{{ m.nickname[0] }}</span>
+            <span class="member-avatar" :class="{ owner: m.role === 'owner' }">{{ (m.nickname || '?')[0] }}</span>
             <span class="member-name">{{ m.nickname }}</span>
             <span class="member-role" :class="m.role">{{ roleLabel(m.role) }}</span>
             <button
@@ -143,7 +143,7 @@ const props = defineProps<{
     created_at?: string
   }
 }>()
-defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: [] }>()
 
 const loading = ref(false)
 const stats = ref<any>(null)
@@ -160,7 +160,12 @@ async function loadStats() {
   loading.value = true
   try {
     stats.value = await projectApi.getStats(props.project.id)
-  } catch (e) {
+  } catch (e: any) {
+    if (e?.status === 404 || e?.message?.includes('不存在')) {
+      ElMessage.warning('项目不存在或已删除')
+      emit('close')
+      return
+    }
     console.error(e)
   } finally {
     loading.value = false

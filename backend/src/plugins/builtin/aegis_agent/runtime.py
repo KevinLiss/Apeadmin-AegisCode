@@ -1090,16 +1090,27 @@ class AgentRuntime:
                                 "reason": active.pending_approval["reason"],
                             }, ensure_ascii=False)
 
-                            # 等待用户审批（最长 120 秒，超时视为拒绝）
+                            # 等待用户审批或取消（最长 120 秒，超时视为拒绝）
                             try:
-                                await asyncio.wait_for(active.approval_event.wait(), timeout=120)
+                                done, pending = await asyncio.wait(
+                                    [
+                                        asyncio.create_task(active.approval_event.wait()),
+                                        asyncio.create_task(active.cancel_event.wait()),
+                                    ],
+                                    timeout=120,
+                                    return_when=asyncio.FIRST_COMPLETED,
+                                )
+                                for t in pending:
+                                    t.cancel()
+                                if active.cancel_event.is_set():
+                                    active.approval_decision = False
                             except asyncio.TimeoutError:
                                 active.approval_decision = False
 
                             if active.approval_decision:
                                 # 批准：跳过确认清单重新执行（高危黑名单仍生效）
                                 from src.plugins.builtin.aegis_agent.workspace.tools.command import execute_command_forced
-                                project_root = await self._resolve_project_root(fn_args.get("project_id"))
+                                project_root = await self._resolve_project_root(active.workspace_id)
                                 tool_result, tool_success, tool_latency = await self._execute_forced_command(
                                     project_root, active.pending_approval["command"],
                                     active.pending_approval["cwd"], active.pending_approval["timeout"],
@@ -1345,18 +1356,20 @@ class AgentRuntime:
                 if args.get("action") == "append":
                     # 保留现有项，追加新项（避免重复 id 用序号）
                     existing_ids = {t.get("id") for t in current}
+                    new_ids: set[str] = set()
                     new_items = []
                     for t in (args.get("todos") or []):
                         tid = t.get("id") or f"t{len(current) + len(new_items) + 1}"
-                        if tid in existing_ids:
+                        while tid in existing_ids or tid in new_ids:
                             tid = f"t{len(current) + len(new_items) + 1}"
+                        new_ids.add(tid)
                         new_items.append({**t, "id": tid})
                     args = {**args, "todos": current + new_items}
                 else:
                     args = {**args, "todos": args.get("todos") or current}
             else:
-                # aegis_todo_list: 无参数，直接返回当前清单
-                args = {}
+                # aegis_todo_list: 直接返回运行时当前清单，无需调 MCP
+                return json.dumps({"todos": current, "count": len(current)}, ensure_ascii=False), True, 0
 
         try:
             result = await mcp_manager.call_tool(name, args, timeout=60.0)

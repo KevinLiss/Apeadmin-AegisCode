@@ -132,27 +132,28 @@ class Sandbox:
     # -----------------------------------------------------------------
 
     def validate_path(self, path: str) -> tuple[bool, str]:
-        """验证路径是否在项目根目录内。
+        """验证路径是否在项目根目录内，或在额外允许的路径内。
 
         Returns:
             (is_valid, resolved_path or reason)
         """
         try:
             target = (self._root / path).resolve()
-            # 检查是否在 root 内
-            if not str(target).startswith(str(self._root)):
-                return False, f"路径越界: {path} 不在项目根目录 {self._root} 内"
+            in_root = str(target).startswith(str(self._root))
 
-            # 检查额外允许的路径
+            if in_root:
+                return True, str(target)
+
+            # 不在 root 内，检查是否在额外允许的路径内
             if self.config.allowed_paths:
                 allowed = any(
                     str(target).startswith(str(Path(p).resolve()))
                     for p in self.config.allowed_paths
                 )
-                if not allowed and not str(target).startswith(str(self._root)):
-                    return False, f"路径不在允许列表内: {path}"
+                if allowed:
+                    return True, str(target)
 
-            return True, str(target)
+            return False, f"路径越界: {path} 不在项目根目录 {self._root} 内"
         except Exception as e:
             return False, f"路径解析失败: {e}"
 

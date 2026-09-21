@@ -53,7 +53,7 @@
             <template v-if="Array.isArray(msg.content)">
               <span v-for="(part, pi) in msg.content" :key="pi">
                 <template v-if="part.type === 'text'">{{ part.text }}</template>
-                <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="msg-image" alt="图片" />
+                <img v-else-if="part.type === 'image_url' && part.image_url?.url" :src="part.image_url.url" class="msg-image" alt="图片" />
               </span>
             </template>
             <template v-else>{{ msg.content }}</template>
@@ -1108,8 +1108,14 @@ function renderTodoCard(todos: any[]) {
 
 // ── 渲染辅助 ──
 function renderContent(text: string): string {
-  // 简单的 markdown 渲染：代码块、行内代码、粗体
-  let html = text
+  // 先 HTML 转义防止 XSS，再做 markdown 替换
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+  return escaped
     // 代码块
     .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="code-block"><code>$2</code></pre>')
     // 行内代码
@@ -1118,7 +1124,6 @@ function renderContent(text: string): string {
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     // 换行
     .replace(/\n/g, '<br>')
-  return html
 }
 
 function formatJson(str: string): string {

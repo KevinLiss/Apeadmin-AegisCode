@@ -57,6 +57,16 @@ from src.plugins.builtin.aegis_agent.workspace.git_manager import GitManager
 router = APIRouter(prefix="/aegis-workspace", tags=["AegisCode 工作区"])
 
 
+async def _get_active_project(db: AsyncSession, project_id: int) -> WorkspaceProject:
+    """获取项目，若不存在或已删除则抛 NotFoundException。"""
+    project = await db.get(WorkspaceProject, project_id)
+    if not project:
+        raise NotFoundException("项目不存在")
+    if project.status == "deleted":
+        raise NotFoundException("项目不存在或已删除")
+    return project
+
+
 # ---------------------------------------------------------------------------
 # 项目 CRUD
 # ---------------------------------------------------------------------------
@@ -133,14 +143,18 @@ async def list_projects(
     page_size: int = Query(default=20, ge=1, le=100),
     status: str | None = Query(default=None),
 ):
-    """分页查询项目列表。"""
+    """分页查询项目列表（默认排除已删除项目）。"""
     stmt = select(WorkspaceProject).order_by(WorkspaceProject.id.desc())
     if status:
         stmt = stmt.where(WorkspaceProject.status == status)
+    else:
+        stmt = stmt.where(WorkspaceProject.status != "deleted")
 
     count_stmt = select(func.count()).select_from(WorkspaceProject)
     if status:
         count_stmt = count_stmt.where(WorkspaceProject.status == status)
+    else:
+        count_stmt = count_stmt.where(WorkspaceProject.status != "deleted")
 
     total = (await db.execute(count_stmt)).scalar() or 0
     items = (await db.execute(stmt.offset((page - 1) * page_size).limit(page_size))).scalars().all()
@@ -160,9 +174,7 @@ async def get_project(
     user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:list"))],
 ):
     """获取项目详情。"""
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
     return success_response(data=ProjectOut.model_validate(project).model_dump())
 
 
@@ -174,9 +186,7 @@ async def update_project(
     user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))],
 ):
     """更新项目配置。"""
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
 
     update_data = body.model_dump(exclude_unset=True)
     if "allowed_paths" in update_data and update_data["allowed_paths"] is not None:
@@ -198,9 +208,7 @@ async def delete_project(
     user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:delete"))],
 ):
     """删除项目（标记删除，不删磁盘文件）。"""
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
 
     project.status = "deleted"
     await db.commit()
@@ -220,9 +228,7 @@ async def get_project_stats(
     - files: 文件数/总大小（磁盘递归统计，跳过 .git）
     - run 集计来自 aegis_agent_runs（workspace_id 关联）
     """
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
 
     from src.plugins.builtin.aegis_agent.models import AgentRun, AgentStep, AgentUsageLog
 
@@ -243,15 +249,16 @@ async def get_project_stats(
         u_in, u_out = (await db.execute(usage_stmt)).one()
         total_tokens = int(u_in or 0) + int(u_out or 0) or total_tokens
 
-    message_count = (
-        await db.execute(
-            select(func.count())
-            .select_from(AgentStep)
-            .where(AgentStep.run_id.in_(run_ids), AgentStep.step_type == "llm_call")
-            if run_ids
-            else select(func.count()).select_from(AgentRun).where(true() == False)  # noqa: E712 空集哨兵
-        )
-    ).scalar() or 0
+    if run_ids:
+        message_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(AgentStep)
+                .where(AgentStep.run_id.in_(run_ids), AgentStep.step_type == "llm_call")
+            )
+        ).scalar() or 0
+    else:
+        message_count = 0
 
     # ── 文件存储：磁盘递归统计（跳过 .git）──
     file_count = 0
@@ -296,9 +303,7 @@ async def list_files(
     recursive=true 时递归返回所有文件（相对路径，跳过 .git 与隐藏目录），
     供文件管理面板三分类展示；否则按目录列一层。
     """
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
 
     if recursive:
         from src.plugins.builtin.aegis_agent.workspace.sandbox import Sandbox, SandboxConfig
@@ -337,9 +342,7 @@ async def read_file(
     path: str = Query(),
 ):
     """读取项目内文件内容。"""
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
 
     from src.plugins.builtin.aegis_agent.workspace.tools.file import read_file as _read
     result = json.loads(await _read(project.root_path, path))
@@ -356,9 +359,7 @@ async def write_file(
     user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))],
 ):
     """写入项目内文件内容。"""
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
 
     file_path = body.get("path", "")
     content = body.get("content", "")
@@ -385,18 +386,16 @@ FORBIDDEN_EXTENSIONS = {".exe", ".sh", ".bat", ".cmd", ".com", ".scr", ".msi", "
 @router.post("/projects/{project_id}/files/upload")
 async def upload_file(
     project_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))],
     file: UploadFile = File(...),
     folder: str = Form(default="用户上传"),
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
-    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))] = None,
 ):
     """上传文件到项目指定文件夹（默认「用户上传」）。
 
     multipart: file + folder（可选，默认 用户上传）
     """
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
 
     if not project.root_path:
         raise ValidationException("项目未启用云存储目录")
@@ -452,9 +451,7 @@ async def delete_project_file(
     path: str = Query(),
 ):
     """删除项目内文件（沙箱内路径校验；目录仅允许删空目录）。"""
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
     if not project.root_path:
         raise ValidationException("项目未启用云存储目录")
 
@@ -520,9 +517,7 @@ async def list_folders(
     user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:list"))],
 ):
     """列出项目文件夹（含文件数与排序）。"""
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
     if not project.root_path:
         raise ValidationException("项目未启用云存储目录")
 
@@ -546,9 +541,7 @@ async def create_folder(
     user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))],
 ):
     """创建文件夹。请求体: {"name": "新文件夹"}"""
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
     if not project.root_path:
         raise ValidationException("项目未启用云存储目录")
 
@@ -580,9 +573,7 @@ async def delete_folder(
     name: str = Query(),
 ):
     """删除文件夹（仅允许删空文件夹；默认三分类文件夹不可删）。"""
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
     if not project.root_path:
         raise ValidationException("项目未启用云存储目录")
 
@@ -622,9 +613,7 @@ async def reorder_folders(
     user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:edit"))],
 ):
     """文件夹排序。请求体: {"order": ["用户上传", "AI生成文档", "AI编程"]}"""
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
     if not project.root_path:
         raise ValidationException("项目未启用云存储目录")
 
@@ -656,9 +645,7 @@ async def execute_command(
 
     请求体: {"command": "ls -la", "cwd": ".", "timeout": 60}
     """
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
 
     command = body.get("command", "")
     cwd = body.get("cwd", ".")
@@ -706,9 +693,7 @@ async def create_snapshot(
     请求体（可选）: {"commit_message": "修复登录bug", "run_id": 1, "step_index": 5}
     无变更时返回 no_changes=true，前端据此提示。
     """
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
 
     if not project.git_enabled:
         raise ValidationException("项目未启用 Git")
@@ -744,9 +729,7 @@ async def list_snapshots(
     user: Annotated[User, Depends(require_permission("aegis_agent:workspace:projects:list"))],
 ):
     """列出项目的 Git 快照。"""
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
 
     git = GitManager(project.root_path)
     snapshots = await git.list_snapshots(project_id)
@@ -787,9 +770,7 @@ async def rollback_snapshot(
 
     回滚以新 commit 形式落地（不 reset 历史），可以再次回滚回来。
     """
-    project = await db.get(WorkspaceProject, project_id)
-    if not project:
-        raise NotFoundException("项目不存在")
+    project = await _get_active_project(db, project_id)
     if not project.git_enabled:
         raise ValidationException("项目未启用 Git")
 

@@ -268,6 +268,12 @@ async function loadAll() {
       if (!(f.name in expandedGroups)) expandedGroups[f.name] = true
     })
   } catch (e: any) {
+    // 项目可能已被删除（404），自动关闭面板
+    if (e?.status === 404 || e?.message?.includes('不存在')) {
+      ElMessage.warning('项目不存在或已删除')
+      emit('close')
+      return
+    }
     ElMessage.error('加载文件列表失败')
     console.error(e)
   } finally {
