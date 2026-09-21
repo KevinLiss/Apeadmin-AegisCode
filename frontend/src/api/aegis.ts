@@ -20,6 +20,24 @@ export const workspaceApi = {
     request.get(`/aegis-workspace/projects/${projectId}/files/read`, { params: { path } }),
   writeFile: (projectId: number, path: string, content: string) =>
     request.post(`/aegis-workspace/projects/${projectId}/files/write`, { path, content }),
+  uploadFile: (projectId: number, file: File, folder = '用户上传') => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('folder', folder)
+    return request.post(`/aegis-workspace/projects/${projectId}/files/upload`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  listFolders: (projectId: number) =>
+    request.get(`/aegis-workspace/projects/${projectId}/folders`),
+  createFolder: (projectId: number, name: string) =>
+    request.post(`/aegis-workspace/projects/${projectId}/folders`, { name }),
+  deleteFolder: (projectId: number, name: string) =>
+    request.delete(`/aegis-workspace/projects/${projectId}/folders`, { params: { name } }),
+  deleteFile: (projectId: number, path: string) =>
+    request.delete(`/aegis-workspace/projects/${projectId}/files`, { params: { path } }),
+  reorderFolders: (projectId: number, order: string[]) =>
+    request.post(`/aegis-workspace/projects/${projectId}/folders/reorder`, { order }),
   executeCommand: (projectId: number, command: string, cwd = '.', timeout = 60) =>
     request.post(`/aegis-workspace/projects/${projectId}/execute`, { command, cwd, timeout }),
   createSnapshot: (projectId: number, data?: { commit_message?: string; run_id?: number; step_index?: number }) =>

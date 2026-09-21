@@ -171,9 +171,33 @@
         </div>
       </Transition>
 
+      <!-- 附件条（已上传待发送的附件） -->
+      <div v-if="attachments.length || uploadingAttachment" class="attachment-bar">
+        <div v-for="(a, i) in attachments" :key="a.path" class="attachment-chip">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+          </svg>
+          <span class="attachment-name" :title="a.path">{{ a.name }}</span>
+          <span class="attachment-size" v-if="a.size">{{ formatAttSize(a.size) }}</span>
+          <button class="attachment-remove" title="移除" @click="removeAttachment(i)">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div v-if="uploadingAttachment" class="attachment-chip uploading">
+          <svg class="spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+          <span>上传中...</span>
+        </div>
+      </div>
+
       <div class="input-box-wrapper">
-        <!-- 左下角：附件按钮（预留） -->
-        <button class="input-icon-btn" title="上传附件（即将上线）" disabled>
+        <!-- 左下角：附件按钮（上传到「用户上传」文件夹） -->
+        <button
+          class="input-icon-btn"
+          :class="{ active: attachments.length > 0 }"
+          :disabled="uploadingAttachment"
+          title="上传附件（自动保存到「用户上传」文件夹）"
+          @click="pickAttachment"
+        >
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
           </svg>
@@ -219,7 +243,7 @@
         <button
           class="send-btn"
           :class="{ stop: streaming }"
-          :disabled="!inputText.trim() && !streaming"
+          :disabled="!inputText.trim() && !attachments.length && !streaming"
           @click="streaming ? controlRun('cancel') : sendMessage()"
         >
           <svg v-if="!streaming" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -230,6 +254,15 @@
           </svg>
         </button>
       </div>
+
+      <!-- 隐藏附件选择器 -->
+      <input
+        ref="attachmentInputRef"
+        type="file"
+        class="hidden-attachment-input"
+        multiple
+        @change="onAttachmentChange"
+      />
 
       <!-- 模型下拉菜单 -->
       <Transition name="menu-fade">
@@ -263,7 +296,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, watch, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
-import { agentApi, providerApi, skillApi } from '@/api/aegis'
+import { agentApi, providerApi, skillApi, workspaceApi } from '@/api/aegis'
 
 const props = defineProps<{
   project: { id: number; name: string; root_path: string }
@@ -378,6 +411,60 @@ function toggleSkill(sk: SkillOption) {
     activeSkill.value = sk
   }
   showSkillMenu.value = false
+}
+
+// ── 附件上传（统一落到「用户上传」文件夹） ──
+interface AttachmentItem {
+  name: string
+  path: string
+  size: number
+}
+const attachments = ref<AttachmentItem[]>([])
+const uploadingAttachment = ref(false)
+const attachmentInputRef = ref<HTMLInputElement | null>(null)
+
+function pickAttachment() {
+  attachmentInputRef.value?.click()
+}
+
+async function onAttachmentChange(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  input.value = '' // 允许重复选择同一文件
+  if (!files.length) return
+
+  uploadingAttachment.value = true
+  let ok = 0
+  let fail = 0
+  for (const f of files) {
+    try {
+      const res: any = await workspaceApi.uploadFile(props.project.id, f, '用户上传')
+      attachments.value.push({
+        name: res?.name || f.name,
+        path: res?.path || `用户上传/${f.name}`,
+        size: res?.size || f.size || 0,
+      })
+      ok++
+    } catch (e: any) {
+      fail++
+      console.error('附件上传失败:', e)
+    }
+  }
+  uploadingAttachment.value = false
+  if (ok && !fail) ElMessage.success(`${ok} 个附件已上传到「用户上传」`)
+  else if (ok && fail) ElMessage.warning(`${ok} 个成功，${fail} 个失败`)
+  else ElMessage.error('附件上传失败')
+}
+
+function removeAttachment(idx: number) {
+  attachments.value.splice(idx, 1)
+}
+
+function formatAttSize(bytes: number): string {
+  if (!bytes) return ''
+  if (bytes < 1024) return bytes + 'B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB'
+  return (bytes / 1024 / 1024).toFixed(1) + 'MB'
 }
 
 // ── 初始化：按外部指定的会话恢复（含历史），否则新建 ──
@@ -530,12 +617,23 @@ function selectModel(key: string) {
 
 // ── 发送消息 ──
 async function sendMessage(presetText?: string) {
-  const text = presetText || inputText.value.trim()
-  if (!text || streaming.value) return
+  const raw = presetText || inputText.value.trim()
+  if ((!raw && !attachments.value.length) || streaming.value) return
 
   inputText.value = ''
   resetInputHeight()
   emit('streamingChange', true)
+
+  // 附件：上传后以路径提示注入消息，告知 Agent 可读取的参考文件
+  const att = attachments.value.slice()
+  attachments.value = []
+  let text = raw
+  if (att.length) {
+    const list = att.map((a) => `- ${a.path}`).join('\n')
+    text = raw
+      ? `${raw}\n\n[已上传参考文件，可用 read_file 工具读取]\n${list}`
+      : `请阅读以下已上传的参考文件：\n${list}`
+  }
 
   // 技能激活时拼接技能 prompt 前缀
   let finalText = text
@@ -1272,12 +1370,82 @@ function onShiftEnter() {
   border: none;
   background: transparent;
   color: var(--theme-text-secondary, #9ca3af);
-  cursor: not-allowed;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.55;
   transition: all 0.15s;
+}
+.input-icon-btn:hover {
+  background: var(--theme-hover-bg, #f3f4f6);
+  color: var(--theme-text-color, #374151);
+}
+.input-icon-btn.active {
+  color: var(--el-color-primary, #4f46e5);
+}
+.input-icon-btn:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+/* ── 附件条 ── */
+.attachment-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 900px;
+  margin: 0 auto 8px;
+  justify-content: flex-end;
+}
+.attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 280px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--theme-border-color, #e5e7eb);
+  background: var(--theme-card-bg, #fff);
+  font-size: 12px;
+  color: var(--theme-text-color, #1f2937);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.attachment-chip > svg {
+  flex-shrink: 0;
+  color: var(--el-color-primary, #4f46e5);
+}
+.attachment-chip.uploading {
+  color: var(--theme-text-secondary, #9ca3af);
+}
+.attachment-chip.uploading > svg {
+  color: var(--el-color-primary, #4f46e5);
+}
+.attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-size {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--theme-text-secondary, #9ca3af);
+}
+.attachment-remove {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--theme-text-secondary, #9ca3af);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+}
+.attachment-remove:hover {
+  color: #ef4444;
+}
+.hidden-attachment-input {
+  display: none;
 }
 
 /* 模型 chip */

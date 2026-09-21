@@ -12,6 +12,12 @@
 - GET    /projects/{id}/files  文件列表
 - GET    /projects/{id}/files/read  读取文件内容
 - POST   /projects/{id}/files/write  写入文件内容
+- POST   /projects/{id}/files/upload  上传文件（multipart，可指定文件夹，默认用户上传）
+- DELETE /projects/{id}/files  删除文件（沙箱内，目录需为空）
+- POST   /projects/{id}/folders  创建文件夹
+- DELETE /projects/{id}/folders  删除文件夹（非空拒绝）
+- GET    /projects/{id}/folders  文件夹列表（含排序）
+- POST   /projects/{id}/folders/reorder  文件夹排序
 - POST   /projects/{id}/execute  执行命令
 - POST   /projects/{id}/snapshot  创建快照
 - GET    /projects/{id}/snapshots 快照列表
@@ -19,10 +25,11 @@
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy import delete, func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -359,6 +366,275 @@ async def write_file(
     if "error" in result:
         raise ValidationException(result["error"])
     return success_response(data=result, msg="文件已保存")
+
+
+# ---------------------------------------------------------------------------
+# 文件上传
+# ---------------------------------------------------------------------------
+
+# 上传大小限制：单文件 20MB
+MAX_UPLOAD_SIZE = 20 * 1024 * 1024
+# 危险扩展名黑名单（服务器侧不落盘可执行内容）
+FORBIDDEN_EXTENSIONS = {".exe", ".sh", ".bat", ".cmd", ".com", ".scr", ".msi", ".app", ".dmg", ".jar"}
+
+
+@router.post("/projects/{project_id}/files/upload")
+async def upload_file(
+    project_id: int,
+    file: UploadFile = File(...),
+    folder: str = Form(default="用户上传"),
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))] = None,
+):
+    """上传文件到项目指定文件夹（默认「用户上传」）。
+
+    multipart: file + folder（可选，默认 用户上传）
+    """
+    project = await db.get(WorkspaceProject, project_id)
+    if not project:
+        raise NotFoundException("项目不存在")
+
+    if not project.root_path:
+        raise ValidationException("项目未启用云存储目录")
+
+    # 文件名校验：去路径分隔符 + 禁止危险扩展
+    raw_name = Path(file.filename or "unnamed").name
+    if not raw_name or raw_name.startswith("."):
+        raise ValidationException("无效的文件名")
+    if Path(raw_name).suffix.lower() in FORBIDDEN_EXTENSIONS:
+        raise ValidationException(f"不支持的文件类型: {Path(raw_name).suffix}")
+
+    # folder 校验：仅允许单层中文名/字母数字（防目录穿越）
+    folder = (folder or "用户上传").strip()
+    if not re.fullmatch(r"[\w\u4e00-\u9fa5-]+", folder):
+        raise ValidationException("文件夹名不合法")
+    if folder in (".", "..") or folder.startswith("."):
+        raise ValidationException("文件夹名不合法")
+
+    # 读内容 + 大小限制
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE:
+        raise ValidationException("文件大小超过 20MB 限制")
+    if not content:
+        raise ValidationException("文件内容为空")
+
+    # 落盘：folder/文件名（沙箱内路径校验）
+    sandbox = Sandbox(SandboxConfig(root_path=project.root_path))
+    rel_path = f"{folder}/{raw_name}"
+    valid, resolved = sandbox.validate_path(rel_path)
+    if not valid:
+        raise ValidationException(resolved)
+
+    dest = Path(resolved)
+    # 同名覆盖提示：返回明确的 overwritten 标记
+    overwritten = dest.exists()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(content)
+
+    return success_response(data={
+        "path": rel_path,
+        "name": raw_name,
+        "folder": folder,
+        "size": len(content),
+        "overwritten": overwritten,
+    }, msg="上传成功")
+
+
+@router.delete("/projects/{project_id}/files")
+async def delete_project_file(
+    project_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))],
+    path: str = Query(),
+):
+    """删除项目内文件（沙箱内路径校验；目录仅允许删空目录）。"""
+    project = await db.get(WorkspaceProject, project_id)
+    if not project:
+        raise NotFoundException("项目不存在")
+    if not project.root_path:
+        raise ValidationException("项目未启用云存储目录")
+
+    if not path or not path.strip():
+        raise ValidationException("文件路径不能为空")
+
+    # 禁止删除项目根或穿越到根
+    if path.strip() in (".", "", "/"):
+        raise ValidationException("非法路径")
+
+    from src.plugins.builtin.aegis_workspace.tools.file import delete_file as _delete
+    result = json.loads(await _delete(project.root_path, path))
+    if "error" in result:
+        raise ValidationException(result["error"])
+    return success_response(data=result, msg="文件已删除")
+
+
+# ---------------------------------------------------------------------------
+# 文件夹管理
+# ---------------------------------------------------------------------------
+
+ORDER_FILE = ".folder-order.json"
+
+
+def _load_folder_order(root_path: str) -> list[str]:
+    """读取文件夹排序（项目根下的 .folder-order.json）。"""
+    f = Path(root_path) / ORDER_FILE
+    if not f.exists():
+        return []
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _save_folder_order(root_path: str, order: list[str]) -> None:
+    f = Path(root_path) / ORDER_FILE
+    f.write_text(json.dumps(order, ensure_ascii=False), encoding="utf-8")
+
+
+def _list_real_folders(root_path: str) -> list[dict]:
+    """列出项目根下的真实文件夹（跳过隐藏目录和 .git）。"""
+    root = Path(root_path)
+    if not root.is_dir():
+        return []
+    result = []
+    for p in sorted(root.iterdir(), key=lambda e: e.name):
+        if not p.is_dir() or p.name.startswith(".") or p.name == ".git":
+            continue
+        try:
+            file_count = sum(1 for _ in p.rglob("*") if _.is_file() and ".git" not in _.parts)
+        except OSError:
+            file_count = 0
+        result.append({"name": p.name, "file_count": file_count})
+    return result
+
+
+@router.get("/projects/{project_id}/folders")
+async def list_folders(
+    project_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:list"))],
+):
+    """列出项目文件夹（含文件数与排序）。"""
+    project = await db.get(WorkspaceProject, project_id)
+    if not project:
+        raise NotFoundException("项目不存在")
+    if not project.root_path:
+        raise ValidationException("项目未启用云存储目录")
+
+    folders = _list_real_folders(project.root_path)
+    order = _load_folder_order(project.root_path)
+
+    # 按排序文件排：有序的在前（按 order 序），未记录的按名称序追加在后
+    def sort_key(f: dict):
+        name = f["name"]
+        return (0, order.index(name)) if name in order else (1, name)
+
+    folders.sort(key=sort_key)
+    return success_response(data={"folders": folders, "order": order})
+
+
+@router.post("/projects/{project_id}/folders")
+async def create_folder(
+    project_id: int,
+    body: dict,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))],
+):
+    """创建文件夹。请求体: {"name": "新文件夹"}"""
+    project = await db.get(WorkspaceProject, project_id)
+    if not project:
+        raise NotFoundException("项目不存在")
+    if not project.root_path:
+        raise ValidationException("项目未启用云存储目录")
+
+    name = (body.get("name") or "").strip()
+    if not name or len(name) > 30:
+        raise ValidationException("文件夹名需为 1-30 个字符")
+    if not re.fullmatch(r"[\w\u4e00-\u9fa5-]+", name):
+        raise ValidationException("文件夹名仅支持中文/字母/数字/下划线/连字符")
+
+    root = Path(project.root_path)
+    target = root / name
+    if target.exists():
+        raise ValidationException(f"文件夹已存在: {name}")
+
+    sandbox = Sandbox(SandboxConfig(root_path=project.root_path))
+    valid, resolved = sandbox.validate_path(name)
+    if not valid:
+        raise ValidationException(resolved)
+
+    target.mkdir(parents=False, exist_ok=False)
+    return success_response(data={"name": name}, msg="文件夹已创建")
+
+
+@router.delete("/projects/{project_id}/folders")
+async def delete_folder(
+    project_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))],
+    name: str = Query(),
+):
+    """删除文件夹（仅允许删空文件夹；默认三分类文件夹不可删）。"""
+    project = await db.get(WorkspaceProject, project_id)
+    if not project:
+        raise NotFoundException("项目不存在")
+    if not project.root_path:
+        raise ValidationException("项目未启用云存储目录")
+
+    name = (name or "").strip()
+    if not name:
+        raise ValidationException("文件夹名不能为空")
+    if name in ("AI生成文档", "AI编程", "用户上传"):
+        raise ValidationException("默认分类文件夹不可删除")
+
+    sandbox = Sandbox(SandboxConfig(root_path=project.root_path))
+    valid, resolved = sandbox.validate_path(name)
+    if not valid:
+        raise ValidationException(resolved)
+
+    target = Path(resolved)
+    if not target.exists() or not target.is_dir():
+        raise NotFoundException("文件夹不存在")
+    if any(target.iterdir()):
+        raise ValidationException("文件夹非空，请先清空文件")
+
+    target.rmdir()
+
+    # 同步清理排序记录
+    order = _load_folder_order(project.root_path)
+    if name in order:
+        order.remove(name)
+        _save_folder_order(project.root_path, order)
+
+    return success_response(msg="文件夹已删除")
+
+
+@router.post("/projects/{project_id}/folders/reorder")
+async def reorder_folders(
+    project_id: int,
+    body: dict,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("aegis_workspace:projects:edit"))],
+):
+    """文件夹排序。请求体: {"order": ["用户上传", "AI生成文档", "AI编程"]}"""
+    project = await db.get(WorkspaceProject, project_id)
+    if not project:
+        raise NotFoundException("项目不存在")
+    if not project.root_path:
+        raise ValidationException("项目未启用云存储目录")
+
+    order = body.get("order")
+    if not isinstance(order, list) or not all(isinstance(n, str) for n in order):
+        raise ValidationException("order 需为字符串数组")
+
+    # 校验：必须与现有文件夹集合一致（防删除/伪造）
+    existing = {f["name"] for f in _list_real_folders(project.root_path)}
+    if set(order) != existing or len(order) != len(existing):
+        raise ValidationException("排序列表与现有文件夹不一致，请刷新后重试")
+
+    _save_folder_order(project.root_path, order)
+    return success_response(data={"order": order}, msg="排序已保存")
 
 
 # ---------------------------------------------------------------------------
