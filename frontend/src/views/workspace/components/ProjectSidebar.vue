@@ -94,7 +94,7 @@
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
             <span class="session-title">{{ session.title || `会话 #${session.id}` }}</span>
-            <span class="session-status-tag" :class="session.status" v-if="session.status && session.status !== 'idle' && session.status !== 'created'">{{ statusLabelOf(session.status) }}</span>
+            <span class="session-status-tag" :class="session.status" v-if="session.status === 'running' || session.status === 'paused' || session.status === 'error' || session.status === 'cancelled'">{{ statusLabelOf(session.status) }}</span>
             <span class="session-more-btn" @click.stop="onSessionContextMenu($event, session)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
             </span>
