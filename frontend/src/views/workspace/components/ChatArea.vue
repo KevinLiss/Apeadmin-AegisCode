@@ -243,9 +243,11 @@
           >
             <div class="model-option-top">
               <span class="model-option-name">{{ opt.label }}</span>
-              <span v-if="opt.key === 'auto'" class="model-tag auto">Auto</span>
+              <span v-if="opt.key === 'auto'" class="model-tag auto" title="系统根据任务类型自动选择最合适的模型">Auto</span>
               <span v-else-if="opt.vision" class="model-tag vision">视觉</span>
-              <span v-if="selectedModel === opt.key" class="model-check">✓</span>
+              <span v-if="selectedModel === opt.key" class="model-check">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </span>
             </div>
             <div class="model-option-desc">{{ opt.desc }}</div>
           </div>
@@ -313,7 +315,12 @@ interface ModelMeta {
 
 // 从 AiProvider.model_details 拉取可选模型
 async function loadModelOptions() {
-  const autoOpt: ModelMeta = { key: 'auto', label: 'Auto 自动选择', desc: '根据任务自动选择最合适的模型' }
+    const autoOpt: ModelMeta = { key: 'auto', label: 'Auto 自动选择', desc: '根据任务自动选择最合适的模型' }
+    // 模型名称友好映射
+    const modelDescMap: Record<string, string> = {
+      'deepseek-chat': '通用对话，适合日常编码与文档生成',
+      'deepseek-reasoner': '深度推理，适合复杂逻辑分析与架构设计',
+    }
   try {
     const res: any = await providerApi.listProviders()
     const items = res.items || []
@@ -324,7 +331,7 @@ async function loadModelOptions() {
         opts.push({
           key: name,
           label: name,
-          desc: meta?.description || p.name || p.provider_type,
+          desc: modelDescMap[name] || meta?.description || p.name || p.provider_type,
           vision: !!meta?.supports_vision,
         })
       }
@@ -332,7 +339,7 @@ async function loadModelOptions() {
       if (!Object.keys(details).length && Array.isArray(p.models)) {
         for (const name of p.models) {
           if (typeof name === 'string' && name) {
-            opts.push({ key: name, label: name, desc: p.name || p.provider_type })
+            opts.push({ key: name, label: name, desc: modelDescMap[name] || p.name || p.provider_type })
           }
         }
       }
@@ -1405,24 +1412,28 @@ function onShiftEnter() {
 /* ── 模型下拉菜单 ── */
 .model-menu {
   position: absolute;
-  bottom: calc(100% - 6px);
+  bottom: 100%;
   left: 50%;
   transform: translateX(-50%);
+  margin-bottom: 6px;
   width: 320px;
   max-height: 340px;
   overflow-y: auto;
   background: var(--theme-card-bg, #fff);
   border: 1px solid var(--theme-border-color, #e5e7eb);
   border-radius: 12px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.13);
+  box-shadow: 0 -6px 32px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.06);
   z-index: 100;
-  padding: 6px;
+  padding: 5px;
 }
 .model-option {
-  padding: 8px 10px;
+  padding: 9px 10px;
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.12s;
+}
+.model-option + .model-option {
+  margin-top: 1px;
 }
 .model-option:hover {
   background: var(--theme-hover-bg, #f3f4f6);
@@ -1458,6 +1469,7 @@ function onShiftEnter() {
 .model-tag.auto {
   background: #ede9fe;
   color: #7c3aed;
+  cursor: help;
 }
 .model-tag.vision {
   background: #dcfce7;
@@ -1466,13 +1478,15 @@ function onShiftEnter() {
 .model-check {
   flex-shrink: 0;
   color: var(--el-color-primary, #4f46e5);
-  font-weight: 700;
-  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .model-option-desc {
   font-size: 11px;
   color: var(--theme-text-secondary, #9ca3af);
-  margin-top: 2px;
+  margin-top: 3px;
+  line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
