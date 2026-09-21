@@ -700,6 +700,7 @@ async def create_snapshot(
     """创建 Git 快照。
 
     请求体（可选）: {"commit_message": "修复登录bug", "run_id": 1, "step_index": 5}
+    无变更时返回 no_changes=true，前端据此提示。
     """
     project = await db.get(WorkspaceProject, project_id)
     if not project:
@@ -718,12 +719,17 @@ async def create_snapshot(
     )
 
     if not snapshot:
-        return success_response(msg="无变更，跳过快照")
+        return success_response(
+            data={"no_changes": True},
+            msg="当前没有文件变更，无需快照",
+        )
 
     return success_response(data={
+        "no_changes": False,
         "commit_hash": snapshot.commit_hash,
         "commit_message": snapshot.commit_message,
         "files_changed": snapshot.files_changed,
+        "files_count": len(snapshot.files_changed),
     }, msg="快照已创建")
 
 
@@ -764,6 +770,53 @@ async def review_snapshot(
     snapshot.review_comment = body.get("comment")
     await db.commit()
     return success_response(msg="审阅已记录")
+
+
+@router.post("/projects/{project_id}/snapshots/{snapshot_id}/rollback")
+async def rollback_snapshot(
+    project_id: int,
+    snapshot_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("aegis_agent:workspace:snapshot"))],
+):
+    """回滚到指定快照。
+
+    回滚以新 commit 形式落地（不 reset 历史），可以再次回滚回来。
+    """
+    project = await db.get(WorkspaceProject, project_id)
+    if not project:
+        raise NotFoundException("项目不存在")
+    if not project.git_enabled:
+        raise ValidationException("项目未启用 Git")
+
+    snapshot = await db.get(WorkspaceSnapshot, snapshot_id)
+    if not snapshot or snapshot.project_id != project_id:
+        raise NotFoundException("快照不存在")
+    if not snapshot.commit_hash:
+        raise ValidationException("快照缺少 commit hash，无法回滚")
+
+    git = GitManager(project.root_path)
+
+    # 回滚前若有未快照变更（如手动上传），先建备份快照兜底——
+    # 回滚的 git clean 会清掉未提交文件，有备份后可再恢复
+    backup = None
+    if await git.has_uncommitted_changes():
+        backup = await git.create_snapshot(
+            project_id=project_id,
+            run_id=snapshot.run_id,
+            commit_message=f"rollback backup: {snapshot.commit_hash[:8]} 前的未提交变更",
+        )
+
+    ok, files = await git.rollback(snapshot.commit_hash)
+    if not ok:
+        raise ValidationException(f"回滚失败: {files[0] if files else '未知错误'}")
+
+    return success_response(data={
+        "rolled_back_to": snapshot.commit_hash[:8],
+        "commit_message": snapshot.commit_message,
+        "files_affected": files,
+        "backup_snapshot": backup.commit_hash[:8] if backup else None,
+    }, msg=f"已回滚到 {snapshot.commit_hash[:8]}")
 
 
 # ---------------------------------------------------------------------------

@@ -116,7 +116,7 @@
     </el-dialog>
 
     <!-- 快照列表弹窗 -->
-    <el-dialog v-model="snapshotDialogVisible" title="Git 快照" width="700px">
+    <el-dialog v-model="snapshotDialogVisible" title="Git 快照" width="760px">
       <el-button type="primary" size="small" @click="handleCreateSnapshot" :loading="creatingSnapshot" style="margin-bottom: 12px">
         创建快照
       </el-button>
@@ -124,7 +124,10 @@
         <el-table-column prop="commit_hash" label="Commit" width="100">
           <template #default="{ row }">{{ row.commit_hash?.slice(0, 8) }}</template>
         </el-table-column>
-        <el-table-column prop="commit_message" label="提交信息" min-width="200" />
+        <el-table-column prop="commit_message" label="提交信息" min-width="180" />
+        <el-table-column label="文件数" width="80">
+          <template #default="{ row }">{{ snapshotFilesCount(row) }}</template>
+        </el-table-column>
         <el-table-column label="审阅" width="80">
           <template #default="{ row }">
             <el-tag :type="row.reviewed ? (row.review_status === 'approved' ? 'success' : 'danger') : 'info'" size="small">
@@ -132,7 +135,9 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="时间" width="160" />
+        <el-table-column label="时间" width="160">
+          <template #default="{ row }">{{ formatSnapshotTime(row.created_at) }}</template>
+        </el-table-column>
       </el-table>
     </el-dialog>
 
@@ -481,6 +486,23 @@ async function fetchSnapshots(projectId: number) {
   }
 }
 
+function snapshotFilesCount(row: any): number {
+  if (Array.isArray(row.files_changed)) return row.files_changed.length
+  if (typeof row.files_changed === 'string' && row.files_changed) {
+    try { return JSON.parse(row.files_changed).length } catch { return 0 }
+  }
+  return row.files_count ?? 0
+}
+
+function formatSnapshotTime(time: string): string {
+  if (!time) return ''
+  // 后端 SQLite 存 naive UTC；无时区后缀时补 Z，避免被当本地时间解析
+  const iso = /Z$|[+-]\d{2}:?\d{2}$/.test(time) ? time : time + 'Z'
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return time
+  return d.toLocaleString('zh-CN', { hour12: false })
+}
+
 async function handleCreateSnapshot() {
   if (!currentProjectId.value) return
   creatingSnapshot.value = true
@@ -488,7 +510,11 @@ async function handleCreateSnapshot() {
     const res: any = await request.post(`/aegis-workspace/projects/${currentProjectId.value}/snapshot`, {
       commit_message: 'manual snapshot',
     })
-    ElMessage.success(res.msg || '快照已创建')
+    if (res?.no_changes) {
+      ElMessage.info('当前没有文件变更，无需创建快照')
+    } else {
+      ElMessage.success(res?.msg || '快照已创建')
+    }
     await fetchSnapshots(currentProjectId.value)
   } finally {
     creatingSnapshot.value = false

@@ -228,6 +228,9 @@ class AgentRuntime:
             self.cancel_event = asyncio.Event()
             self.pause_event = asyncio.Event()
             self.step_counter = 0
+            # 关联信息（自动快照用，从 DB run 行懒加载填充）
+            self.workspace_id: int | None = None
+            self.run_title: str | None = None
             # 事件广播（后台任务写入，SSE 订阅者消费）
             self.event_queues: list[asyncio.Queue] = []
             self.finished = asyncio.Event()
@@ -314,6 +317,9 @@ class AgentRuntime:
         ))
 
         self._active_runs[run.id] = self._ActiveRun(run.id, context, budget)
+        # 填充 workspace/title 供自动快照使用
+        self._active_runs[run.id].workspace_id = run.workspace_id
+        self._active_runs[run.id].run_title = run.title
         logger.info(f"AgentRun created: id={run.id} user={user_id} model={model_name}")
         return run
 
@@ -343,6 +349,8 @@ class AgentRuntime:
                 # step_counter 从 DB 累计值起步，避免重建后从 0 重编号
                 # （新 step_index 会与历史 step 冲突，且覆盖 run.step_count）
                 active.step_counter = run.step_count
+                active.workspace_id = run.workspace_id
+                active.run_title = run.title
                 self._active_runs[run.id] = active
                 logger.info(f"Rebuilt active run from DB: run={run_id}")
 
@@ -1320,6 +1328,46 @@ class AgentRuntime:
                 run.step_count = max(run.step_count, active.step_counter)
                 await db.commit()
         logger.info(f"AgentRun completed: id={active.run_id} steps={active.step_counter}")
+
+        # 自动快照：Agent 运行结束后，若关联工作区项目且启用 Git，自动提交快照
+        # （之前仅手动触发，模型注释/前端文案均承诺自动创建但从未实现）
+        if active.workspace_id:
+            try:
+                await self._auto_snapshot(active)
+            except Exception as e:
+                # 快照失败不影响 run 结果
+                logger.warning(f"Auto snapshot failed: run={active.run_id} err={e}")
+
+    async def _auto_snapshot(self, active: _ActiveRun) -> None:
+        """Agent 运行结束后的自动 Git 快照。"""
+        from src.plugins.builtin.aegis_agent.workspace.git_manager import GitManager
+        from src.plugins.builtin.aegis_agent.workspace.models import WorkspaceProject
+
+        async with SessionLocal() as db:
+            project = await db.get(WorkspaceProject, active.workspace_id)
+            if not project or not project.git_enabled or not project.root_path:
+                return
+            root_path = project.root_path
+            project_id = project.id
+
+        git = GitManager(root_path)
+        # 只有工作区确有变更才提交，避免产生空快照记录
+        if not await git.has_uncommitted_changes():
+            logger.debug(f"Auto snapshot skipped (no changes): project={project_id}")
+            return
+
+        title = (active.run_title or "")[:50]
+        snapshot = await git.create_snapshot(
+            project_id=project_id,
+            run_id=active.run_id,
+            step_index=active.step_counter,
+            commit_message=f"auto: {title}" if title else "auto snapshot",
+        )
+        if snapshot:
+            logger.info(
+                f"Auto snapshot created: run={active.run_id} project={project_id} "
+                f"commit={snapshot.commit_hash[:8]} files={len(snapshot.files_changed)}"
+            )
 
     async def _fail_run(self, active: _ActiveRun, error: str) -> None:
         """标记运行失败。"""

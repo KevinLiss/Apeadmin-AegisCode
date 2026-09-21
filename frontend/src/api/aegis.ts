@@ -46,6 +46,8 @@ export const workspaceApi = {
     request.get(`/aegis-workspace/projects/${projectId}/snapshots`),
   reviewSnapshot: (projectId: number, snapshotId: number, data: { status: string; comment?: string }) =>
     request.post(`/aegis-workspace/projects/${projectId}/snapshots/${snapshotId}/review`, data),
+  rollbackSnapshot: (projectId: number, snapshotId: number) =>
+    request.post(`/aegis-workspace/projects/${projectId}/snapshots/${snapshotId}/rollback`),
 }
 
 // ── Agent 运行 ──
