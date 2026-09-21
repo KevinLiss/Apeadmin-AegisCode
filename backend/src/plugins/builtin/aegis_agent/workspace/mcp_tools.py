@@ -21,6 +21,7 @@ from src.plugins.builtin.aegis_agent.workspace.tools.file import (
 )
 from src.plugins.builtin.aegis_agent.workspace.tools.command import execute_command
 from src.plugins.builtin.aegis_agent.workspace.tools.search import search_code
+from src.plugins.builtin.aegis_agent.workspace.tools.todo import aegis_todo_list, aegis_todo_write
 
 
 # ---------------------------------------------------------------------------
@@ -186,4 +187,8 @@ def register_aegis_workspace_mcp_tools() -> None:
     # 项目管理
     mcp_manager.register_tool("aegis_list_projects", "列出工作区项目", _aegis_list_projects, plugin_name="aegis_agent", category="aegis_agent")
 
-    logger.info("Registered 8 aegis workspace MCP tools")
+    # Todo 任务清单
+    mcp_manager.register_tool("aegis_todo_write", "写入/更新 Agent 任务清单（todos）", aegis_todo_write, plugin_name="aegis_agent", category="aegis_agent")
+    mcp_manager.register_tool("aegis_todo_list", "列出当前 Agent 任务清单", aegis_todo_list, plugin_name="aegis_agent", category="aegis_agent")
+
+    logger.info("Registered 10 aegis workspace MCP tools")

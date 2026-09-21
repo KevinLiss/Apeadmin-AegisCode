@@ -37,6 +37,38 @@ DANGEROUS_PATTERNS: list[re.Pattern] = [
     re.compile(r":\(\)\s*\{[^}]*\}\s*;\s*:"),
 ]
 
+# 中危命令清单——不直接拦截，但需要用户人工确认后才会执行。
+# 这些命令本身可能造成不可逆影响（删除/强制推送/重写历史等），
+# 在自动化 Agent 场景中必须经用户批准。
+CONFIRM_REQUIRED_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\brm\s+-rf\b"),                    # rm -rf 相对路径（绝对路径已被高危拦截）
+    re.compile(r"\brm\s+-r\b"),                     # rm -r 递归删除
+    re.compile(r"\bgit\s+push\s+.*(--force|-f\b)"),  # git push --force
+    re.compile(r"\bgit\s+reset\s+--hard"),          # git reset --hard
+    re.compile(r"\bgit\s+clean\s+-fd"),             # git clean -fd
+    re.compile(r"\bgit\s+branch\s+-D\b"),           # git branch -D
+    re.compile(r"\bgit\s+checkout\s+--force"),      # git checkout --force
+    re.compile(r"\b(pip|pip3)\s+uninstall\b"),      # pip uninstall
+    re.compile(r"\b(pip|pip3)\s+install\s+--force"),# pip install --force
+    re.compile(r"\bnpm\s+(uninstall|rm)\s+-g"),     # npm uninstall -g
+    re.compile(r"\bnpm\s+publish\b"),               # npm publish
+    re.compile(r"\bdrop\s+table\b", re.IGNORECASE),  # drop table
+    re.compile(r"\balter\s+table\b", re.IGNORECASE), # alter table
+    re.compile(r"\bdelete\s+from\b", re.IGNORECASE), # delete from
+    re.compile(r"\bkill\s+-9\b"),                   # kill -9
+    re.compile(r"\bpkill\s+-9\b"),                  # pkill -9
+    re.compile(r"\bdocker\s+(rm|rmi|system\s+prune)\b"),  # docker 删除
+    re.compile(r"\bsudo\b"),                        # sudo
+    re.compile(r"\bdrop\s+database\b", re.IGNORECASE),    # drop database
+    re.compile(r"\bchmod\s+-R\s+777\b"),            # chmod -R 777 非根目录
+    re.compile(r"\bgit\s+config\s+--global"),       # git config --global
+    re.compile(r"\bshred\b"),                       # shred 覆写删除
+    re.compile(r"\bdd\b"),                          # dd（除已拦截的 of=/dev/ 外）
+    re.compile(r"\bcurl\s+.*\|\s*(\bbash\b|\bsudo\b)"),  # curl | bash / sudo
+    re.compile(r"\bmysql\s+.*-e\b"),                # mysql -e 直连执行
+    re.compile(r"\bpsql\s+.*-c\b"),                 # psql -c 直连执行
+]
+
 # 允许的命令前缀（白名单模式可选）
 SAFE_COMMANDS: set[str] = {
     "ls", "cat", "head", "tail", "grep", "find", "wc", "sort", "uniq",
@@ -78,6 +110,8 @@ class ExecutionResult:
     duration_ms: int = 0
     blocked: bool = False
     block_reason: str = ""
+    needs_approval: bool = False  # True=命中中危清单，需用户人工确认后才执行
+    approval_reason: str = ""     # 需要审批的原因
 
 
 class Sandbox:
@@ -126,35 +160,42 @@ class Sandbox:
     # 命令校验
     # -----------------------------------------------------------------
 
-    def validate_command(self, command: str) -> tuple[bool, str]:
+    def validate_command(self, command: str) -> tuple[bool, str, bool]:
         """验证命令是否安全。
 
         Returns:
-            (is_safe, reason_if_blocked)
+            (is_safe, reason_if_blocked, needs_confirmation)
+            - is_safe=False 表示命令被直接拦截（高危黑名单）
+            - needs_confirmation=True 表示命令命中中危清单，需用户人工确认
         """
         if not command.strip():
-            return False, "空命令"
+            return False, "空命令", False
 
         # 1. 检查用户自定义黑名单
         for blocked in self.config.blocked_commands:
             if blocked in command:
-                return False, f"命令被黑名单拦截: 匹配 '{blocked}'"
+                return False, f"命令被黑名单拦截: 匹配 '{blocked}'", False
 
-        # 2. 检查危险模式
+        # 2. 检查危险模式（高危——直接拦截）
         for pattern in DANGEROUS_PATTERNS:
             if pattern.search(command):
-                return False, f"命令匹配危险模式: {pattern.pattern[:50]}"
+                return False, f"命令匹配危险模式: {pattern.pattern[:50]}", False
+
+        # 2.5 检查中危清单（需人工确认）
+        for pattern in CONFIRM_REQUIRED_PATTERNS:
+            if pattern.search(command):
+                return True, f"命令命中需人工确认模式: {pattern.pattern[:50]}", True
 
         # 3. 白名单模式：检查命令前缀
         if self.config.use_whitelist:
             try:
                 parts = shlex.split(command)
                 if parts and parts[0] not in SAFE_COMMANDS:
-                    return False, f"命令 '{parts[0]}' 不在白名单中"
+                    return False, f"命令 '{parts[0]}' 不在白名单中", False
             except ValueError:
-                return False, "命令解析失败"
+                return False, "命令解析失败", False
 
-        return True, ""
+        return True, "", False
 
     # -----------------------------------------------------------------
     # 执行命令
@@ -165,21 +206,35 @@ class Sandbox:
         command: str,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
+        skip_confirmation: bool = False,
     ) -> ExecutionResult:
         """在沙箱内执行命令。
 
         流程:
-        1. 校验命令安全性
+        1. 校验命令安全性（高危直接拦截；中危返回 needs_approval）
         2. 校验工作目录
         3. 执行（带超时）
         4. 截断输出
+
+        Args:
+            command: 要执行的命令
+            cwd: 工作目录（相对项目根）
+            env: 额外环境变量
+            skip_confirmation: True=跳过中危确认清单（仅限用户已批准后由 runtime 调用）
         """
         import time
 
         start = time.time()
 
         # 校验命令
-        is_safe, reason = self.validate_command(command)
+        is_safe, reason, needs_confirmation = self.validate_command(command)
+        if needs_confirmation and not skip_confirmation:
+            logger.warning(f"Sandbox needs approval for command: {command[:100]} — {reason}")
+            return ExecutionResult(
+                needs_approval=True,
+                approval_reason=reason,
+                duration_ms=int((time.time() - start) * 1000),
+            )
         if not is_safe:
             logger.warning(f"Sandbox blocked command: {command[:100]} — {reason}")
             return ExecutionResult(

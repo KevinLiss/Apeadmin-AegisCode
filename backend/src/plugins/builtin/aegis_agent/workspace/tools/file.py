@@ -56,6 +56,7 @@ async def write_file(project_root: str, file_path: str, content: str) -> str:
         file_path: 相对项目根的文件路径
         content: 文件内容
     """
+    import difflib
     import json
 
     sandbox = Sandbox(SandboxConfig(root_path=project_root))
@@ -70,6 +71,7 @@ async def write_file(project_root: str, file_path: str, content: str) -> str:
 
         # 如果文件已存在，记录旧内容
         old_hash = None
+        old_content = ""
         if path.exists():
             old_content = path.read_text(encoding="utf-8", errors="replace")
             old_hash = hashlib.md5(old_content.encode()).hexdigest()
@@ -77,12 +79,31 @@ async def write_file(project_root: str, file_path: str, content: str) -> str:
         path.write_text(content, encoding="utf-8")
         new_hash = hashlib.md5(content.encode()).hexdigest()
 
+        # 生成统一 diff（新文件无旧内容，diff 即全部新增行）
+        diff_lines = list(difflib.unified_diff(
+            old_content.splitlines(keepends=True),
+            content.splitlines(keepends=True),
+            fromfile=file_path,
+            tofile=file_path,
+            lineterm="",
+        ))
+        diff_text = "".join(diff_lines)
+        # 简化：统计变更统计（新增/删除行数）
+        added = sum(1 for ln in diff_lines if ln.startswith("+") and not ln.startswith("+++"))
+        removed = sum(1 for ln in diff_lines if ln.startswith("-") and not ln.startswith("---"))
+
         return json.dumps({
             "path": file_path,
             "action": "created" if old_hash is None else "modified",
             "old_hash": old_hash,
             "new_hash": new_hash,
             "size": len(content),
+            "diff": diff_text,
+            "diff_stats": {
+                "added": added,
+                "removed": removed,
+                "total": added + removed,
+            },
         }, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)

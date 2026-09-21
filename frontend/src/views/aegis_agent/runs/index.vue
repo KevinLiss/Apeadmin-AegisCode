@@ -41,10 +41,11 @@
         </template>
       </el-table-column>
       <el-table-column prop="created_at" label="创建时间" width="170" />
-      <el-table-column label="操作" width="200" fixed="right">
+      <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="goDetail(row.id)" v-permission="'aegis_agent:runs:detail'">详情</el-button>
           <el-button link type="success" size="small" @click="openMessage(row.id)" v-permission="'aegis_agent:runs:control'">对话</el-button>
+          <el-button v-if="row.status === 'paused' || row.status === 'running'" link type="warning" size="small" :loading="restoringId === row.id" @click="handleRestore(row)" v-permission="'aegis_agent:runs:control'">恢复运行</el-button>
           <el-button link type="danger" size="small" @click="handleDelete(row)" v-permission="'aegis_agent:runs:delete'">删除</el-button>
         </template>
       </el-table-column>
@@ -128,6 +129,8 @@ const tableData = ref([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
+
+const restoringId = ref<number | null>(null)
 
 const createDialogVisible = ref(false)
 const createForm = reactive({
@@ -345,6 +348,19 @@ function scrollToBottom() {
 function goDetail(id: number) {
   // 跳转隐藏路由页 /aegis-agent/runs/:id（visible=0，不在侧边栏但路由已注册）
   router.push(`/aegis-agent/runs/${id}`)
+}
+
+async function handleRestore(row: any) {
+  restoringId.value = row.id
+  try {
+    await request.post(`/aegis-agent/runs/${row.id}/restore`)
+    ElMessage.success('已从检查点恢复运行')
+    await fetchList()
+  } catch (e: any) {
+    ElMessage.error('恢复失败: ' + (e?.message || e))
+  } finally {
+    restoringId.value = null
+  }
 }
 
 async function handleDelete(row: any) {

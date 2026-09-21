@@ -165,6 +165,12 @@
             </svg>
             <span>重命名</span>
           </div>
+          <div class="context-menu-item" @click="handleRestoreSession(contextMenu.session)" v-if="contextMenu.session.status === 'paused' || contextMenu.session.status === 'error' || contextMenu.session.status === 'cancelled'">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+            <span>恢复运行</span>
+          </div>
           <div class="context-menu-item" @click="togglePin(contextMenu.session)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14l-1.5-3V2h-11v12z"/>
@@ -217,6 +223,21 @@
             <div class="form-group">
               <label>项目描述（可选）</label>
               <textarea v-model="newProject.description" placeholder="项目简介..." class="form-textarea" rows="2"></textarea>
+            </div>
+            <div class="form-group">
+              <label>项目模板</label>
+              <div class="template-options">
+                <div
+                  v-for="tpl in projectTemplates"
+                  :key="tpl.key"
+                  class="template-option"
+                  :class="{ active: newProject.template === tpl.key }"
+                  @click="newProject.template = tpl.key"
+                >
+                  <div class="template-name">{{ tpl.label }}</div>
+                  <div class="template-desc">{{ tpl.description }}</div>
+                </div>
+              </div>
             </div>
             <div class="form-group">
               <label>存储方式</label>
@@ -393,10 +414,23 @@ const creating = ref(false)
 const newProject = ref({
   name: '',
   description: '',
+  template: 'empty',
   storage_type: 'cloud' as 'cloud' | 'local',
   root_hint: '',
   git_enabled: true,
 })
+
+// ── 项目模板 ──
+const projectTemplates = ref<{
+  key: string
+  label: string
+  description: string
+}[]>([
+  { key: 'empty', label: '空项目', description: '不含任何初始文件，仅有默认目录结构' },
+  { key: 'python', label: 'Python 项目', description: 'FastAPI 风格，含 main.py 和 requirements.txt' },
+  { key: 'node', label: 'Node.js 项目', description: 'Express 风格，含 index.js 和 package.json' },
+  { key: 'web', label: '前端项目', description: 'HTML + CSS + JavaScript 静态页面' },
+])
 
 // ── 重命名 ──
 const renamingSession = ref<Session | null>(null)
@@ -593,6 +627,19 @@ async function toggleArchive(session: Session) {
   }
 }
 
+// ── 恢复运行 ──
+async function handleRestoreSession(session: Session) {
+  closeContextMenu()
+  try {
+    await agentApi.restoreRun(session.id)
+    ElMessage.success('已从检查点恢复运行')
+    const pid = session.workspace_id
+    if (pid) await refreshSessions(pid)
+  } catch (e: any) {
+    ElMessage.error(e.message || '恢复失败')
+  }
+}
+
 // ── 创建项目 ──
 async function handleCreate() {
   creating.value = true
@@ -600,6 +647,7 @@ async function handleCreate() {
     const payload: any = {
       name: newProject.value.name,
       description: newProject.value.description || undefined,
+      template: newProject.value.template || undefined,
       storage_type: newProject.value.storage_type,
       git_enabled: newProject.value.git_enabled,
     }
@@ -611,7 +659,7 @@ async function handleCreate() {
     const res: any = await workspaceApi.createProject(payload)
     ElMessage.success('项目已创建')
     showCreateDialog.value = false
-    newProject.value = { name: '', description: '', storage_type: 'cloud', root_hint: '', git_enabled: true }
+    newProject.value = { name: '', description: '', template: 'empty', storage_type: 'cloud', root_hint: '', git_enabled: true }
     await loadProjects()
     if (res.id) emit('selectProject', res.id)
   } catch (e: any) {
@@ -1016,6 +1064,36 @@ onBeforeUnmount(() => {
 }
 
 /* 存储方式选择 */
+.template-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.template-option {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 2px solid var(--theme-border-color, #e5e7eb);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.template-option:hover {
+  border-color: var(--el-color-primary, #4f46e5);
+}
+.template-option.active {
+  border-color: var(--el-color-primary, #4f46e5);
+  background: var(--el-color-primary-light-9, #eef2ff);
+}
+.template-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--theme-text-color, #1f2937);
+}
+.template-desc {
+  font-size: 11px;
+  color: var(--theme-text-secondary, #9ca3af);
+  margin-top: 2px;
+  line-height: 1.4;
+}
 .storage-options {
   display: flex;
   flex-direction: column;

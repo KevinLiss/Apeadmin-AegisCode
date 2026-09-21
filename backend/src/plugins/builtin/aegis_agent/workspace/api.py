@@ -107,6 +107,10 @@ async def create_project(
         for subdir in ["AI生成文档", "AI编程", "用户上传"]:
             (project_path / subdir).mkdir(exist_ok=True)
 
+        # 项目模板: 按模板生成初始文件
+        from src.plugins.builtin.aegis_agent.workspace.templates import apply_template
+        apply_template(project_path, body.template)
+
         project.root_path = str(project_path.resolve())
 
         # Git 初始化

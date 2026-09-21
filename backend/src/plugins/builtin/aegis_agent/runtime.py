@@ -234,6 +234,12 @@ class AgentRuntime:
             # 事件广播（后台任务写入，SSE 订阅者消费）
             self.event_queues: list[asyncio.Queue] = []
             self.finished = asyncio.Event()
+            # ── 高危命令人工审批 ──
+            self.pending_approval: dict | None = None  # 待审批命令信息
+            self.approval_event = asyncio.Event()     # 审批结果通知
+            self.approval_decision: bool | None = None  # None=未决定 True=批准 False=拒绝
+            # ── Todo 任务清单（run 生命周期内有效） ──
+            self.todos: list[dict] = []
 
         def publish(self, event: str) -> None:
             """向所有 SSE 订阅者广播事件。"""
@@ -326,10 +332,12 @@ class AgentRuntime:
     async def send_message(
         self,
         run_id: int,
-        content: str,
+        content: str | list,
         stream: bool = True,
     ) -> AsyncGenerator[str, None] | dict[str, Any]:
         """向 Agent 发送消息并运行对话循环。
+
+        content 支持纯文本 str 或 OpenAI 多模态 content 数组（含图片）。
 
         stream=True 时返回 AsyncGenerator（SSE 事件流）
         stream=False 时返回最终结果 dict
@@ -398,7 +406,15 @@ class AgentRuntime:
         async with SessionLocal() as db:
             run = await db.get(AgentRun, run_id)
             if run and not run.title:
-                snippet = content.strip().replace("\n", " ")
+                # 多模态 content：仅取文本部分生成标题
+                if isinstance(content, list):
+                    snippet = " ".join(
+                        (p.get("text", "") if isinstance(p, dict) else str(p))
+                        for p in content if isinstance(p, dict) and p.get("type") == "text"
+                    ) or "[图片消息]"
+                else:
+                    snippet = content
+                snippet = snippet.strip().replace("\n", " ")
                 run.title = snippet[:30] + ("..." if len(snippet) > 30 else "")
                 await db.commit()
 
@@ -690,7 +706,7 @@ class AgentRuntime:
     async def _run_loop_non_stream(
         self,
         active: _ActiveRun,
-        user_content: str,
+        user_content: str | list,
     ) -> dict[str, Any]:
         """非流式对话循环。"""
         provider = await self._get_provider(active.run_id)
@@ -779,8 +795,17 @@ class AgentRuntime:
                     except json.JSONDecodeError:
                         fn_args = {}
 
-                    tool_result, tool_success, tool_latency = await self._execute_tool(fn_name, fn_args)
+                    tool_result, tool_success, tool_latency = await self._execute_tool(fn_name, fn_args, active)
                     result_hash = hashlib.md5(tool_result.encode()).hexdigest()[:16]
+
+                    # Todo 工具：非流式路径同样更新 run 级清单
+                    if fn_name in ("aegis_todo_write", "aegis_todo_list") and tool_success:
+                        try:
+                            todo_parsed = json.loads(tool_result)
+                            if isinstance(todo_parsed.get("todos"), list):
+                                active.todos = todo_parsed["todos"]
+                        except (json.JSONDecodeError, TypeError):
+                            pass
 
                     # 循环检测
                     loop_check = active.loop_detector.record(fn_name, fn_args, result_hash)
@@ -833,7 +858,7 @@ class AgentRuntime:
     async def _run_loop_stream(
         self,
         active: _ActiveRun,
-        user_content: str,
+        user_content: str | list,
     ) -> AsyncGenerator[str, None]:
         """流式对话循环，yield SSE 事件。"""
         provider = await self._get_provider(active.run_id)
@@ -1024,8 +1049,83 @@ class AgentRuntime:
                         "arguments": fn_args,
                     }, ensure_ascii=False)
 
-                    tool_result, tool_success, tool_latency = await self._execute_tool(fn_name, fn_args)
+                    tool_result, tool_success, tool_latency = await self._execute_tool(fn_name, fn_args, active)
                     result_hash = hashlib.md5(tool_result.encode()).hexdigest()[:16]
+
+                    # ── Todo 工具：更新 run 级任务清单并广播事件 ──
+                    if fn_name in ("aegis_todo_write", "aegis_todo_list") and tool_success:
+                        try:
+                            todo_parsed = json.loads(tool_result)
+                            if isinstance(todo_parsed.get("todos"), list):
+                                active.todos = todo_parsed["todos"]
+                                yield json.dumps({
+                                    "type": "todo_update",
+                                    "todos": active.todos,
+                                }, ensure_ascii=False)
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+
+                    # ── 高危命令人工审批：命令命中中危清单时挂起，等待用户批准/拒绝 ──
+                    if fn_name == "aegis_execute_command" and tool_success:
+                        try:
+                            parsed_result = json.loads(tool_result)
+                        except json.JSONDecodeError:
+                            parsed_result = {}
+                        if parsed_result.get("needs_approval"):
+                            # 发出审批请求事件，前端展示批准/拒绝卡片
+                            active.pending_approval = {
+                                "tool_call_id": tc["id"],
+                                "command": fn_args.get("command", ""),
+                                "cwd": fn_args.get("cwd", "."),
+                                "timeout": fn_args.get("timeout", 60),
+                                "reason": parsed_result.get("approval_reason") or "命令命中需人工确认清单",
+                            }
+                            active.approval_event.clear()
+                            active.approval_decision = None
+
+                            yield json.dumps({
+                                "type": "tool_approval_request",
+                                "name": fn_name,
+                                "command": active.pending_approval["command"],
+                                "reason": active.pending_approval["reason"],
+                            }, ensure_ascii=False)
+
+                            # 等待用户审批（最长 120 秒，超时视为拒绝）
+                            try:
+                                await asyncio.wait_for(active.approval_event.wait(), timeout=120)
+                            except asyncio.TimeoutError:
+                                active.approval_decision = False
+
+                            if active.approval_decision:
+                                # 批准：跳过确认清单重新执行（高危黑名单仍生效）
+                                from src.plugins.builtin.aegis_agent.workspace.tools.command import execute_command_forced
+                                project_root = await self._resolve_project_root(fn_args.get("project_id"))
+                                tool_result, tool_success, tool_latency = await self._execute_forced_command(
+                                    project_root, active.pending_approval["command"],
+                                    active.pending_approval["cwd"], active.pending_approval["timeout"],
+                                )
+                                result_hash = hashlib.md5(tool_result.encode()).hexdigest()[:16]
+                            else:
+                                # 拒绝：构造拒绝结果返回给 LLM
+                                tool_result = json.dumps({
+                                    "command": active.pending_approval["command"],
+                                    "exit_code": -1,
+                                    "stdout": "",
+                                    "stderr": "",
+                                    "duration_ms": 0,
+                                    "blocked": True,
+                                    "block_reason": "用户拒绝执行该命令",
+                                    "needs_approval": True,
+                                    "approval_reason": active.pending_approval["reason"],
+                                    "approved": False,
+                                }, ensure_ascii=False)
+                                tool_success = False
+                                tool_latency = 0
+                                result_hash = hashlib.md5(tool_result.encode()).hexdigest()[:16]
+
+                            active.pending_approval = None
+                            active.approval_decision = None
+                            active.approval_event.clear()
 
                     # 循环检测
                     loop_check = active.loop_detector.record(fn_name, fn_args, result_hash)
@@ -1200,9 +1300,64 @@ class AgentRuntime:
             })
         return tools
 
-    async def _execute_tool(self, name: str, args: dict) -> tuple[str, bool, int]:
-        """执行工具调用，返回 (result_json, success, latency_ms)。"""
+    async def _resolve_project_root(self, project_id: Any) -> str:
+        """从数据库解析项目根路径（供审批后强制命令执行）。"""
+        from src.plugins.builtin.aegis_agent.workspace.models import WorkspaceProject
+        async with SessionLocal() as db:
+            project = await db.get(WorkspaceProject, project_id)
+            if not project:
+                raise ValueError(f"项目 {project_id} 不存在")
+            return project.root_path
+
+    async def _execute_forced_command(
+        self,
+        project_root: str,
+        command: str,
+        cwd: str,
+        timeout: int,
+    ) -> tuple[str, bool, int]:
+        """用户已批准后，跳过确认清单执行命令。"""
+        import time as _time
+        from src.plugins.builtin.aegis_agent.workspace.tools.command import execute_command_forced
+        start = _time.time()
+        try:
+            result = await execute_command_forced(project_root, command, cwd=cwd, timeout=timeout)
+            latency = int((_time.time() - start) * 1000)
+            return result, True, latency
+        except Exception as e:
+            latency = int((_time.time() - start) * 1000)
+            logger.error(f"Forced command execution failed: {command[:100]} -> {e}")
+            return json.dumps({"error": str(e)}, ensure_ascii=False), False, latency
+
+    async def _execute_tool(self, name: str, args: dict, active: _ActiveRun | None = None) -> tuple[str, bool, int]:
+        """执行工具调用，返回 (result_json, success, latency_ms)。
+
+        active 参数用于 Todo 工具的运行时状态注入：
+        - aegis_todo_write: 注入当前 todos（action=append 时合并）
+        - aegis_todo_list:  注入当前 todos 供 LLM 读取
+        """
         start = time.time()
+
+        # ── Todo 工具运行时注入 ──
+        if name in ("aegis_todo_write", "aegis_todo_list") and active:
+            current = list(active.todos)
+            if name == "aegis_todo_write":
+                if args.get("action") == "append":
+                    # 保留现有项，追加新项（避免重复 id 用序号）
+                    existing_ids = {t.get("id") for t in current}
+                    new_items = []
+                    for t in (args.get("todos") or []):
+                        tid = t.get("id") or f"t{len(current) + len(new_items) + 1}"
+                        if tid in existing_ids:
+                            tid = f"t{len(current) + len(new_items) + 1}"
+                        new_items.append({**t, "id": tid})
+                    args = {**args, "todos": current + new_items}
+                else:
+                    args = {**args, "todos": args.get("todos") or current}
+            else:
+                # aegis_todo_list: 无参数，直接返回当前清单
+                args = {}
+
         try:
             result = await mcp_manager.call_tool(name, args, timeout=60.0)
             latency = int((time.time() - start) * 1000)

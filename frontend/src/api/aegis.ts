@@ -80,7 +80,7 @@ export const agentApi = {
   deleteRun: (runId: number) => request.delete(`/aegis-agent/runs/${runId}`),
 
   /** 发送消息 — stream=true 返回 fetch Response（SSE），stream=false 返回结果 */
-  sendMessage: (runId: number, content: string, stream = true, signal?: AbortSignal): Promise<Response> | Promise<any> => {
+  sendMessage: (runId: number, content: string | any[], stream = true, signal?: AbortSignal): Promise<Response> | Promise<any> => {
     if (stream) {
       // SSE 用原生 fetch（axios 不支持流式）
       const token = localStorage.getItem('apeadmin_token') || ''
@@ -99,6 +99,14 @@ export const agentApi = {
 
   controlRun: (runId: number, action: 'pause' | 'resume' | 'cancel') =>
     request.post(`/aegis-agent/runs/${runId}/control`, { action }),
+
+  /** 批准/拒绝运行中待审批的高危命令 */
+  approveCommand: (runId: number, decision: boolean) =>
+    request.post(`/aegis-agent/runs/${runId}/approve`, null, { params: { decision } }),
+
+  /** 从检查点恢复运行 */
+  restoreRun: (runId: number) =>
+    request.post(`/aegis-agent/runs/${runId}/restore`),
 
   getRunStatus: (runId: number) => request.get(`/aegis-agent/runs/${runId}/status`),
 

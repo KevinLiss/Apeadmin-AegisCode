@@ -288,6 +288,25 @@ async def control_run(
     return success_response(data=result)
 
 
+@router.post("/runs/{run_id}/approve")
+async def approve_command(
+    run_id: int,
+    user: Annotated[User, Depends(require_permission("aegis_agent:runs:control"))],
+    decision: bool = Query(..., description="true=批准 false=拒绝"),
+):
+    """批准/拒绝运行中待审批的高危命令。"""
+    active = agent_runtime._active_runs.get(run_id)
+    if not active or not active.pending_approval:
+        raise NotFoundException("当前没有待审批的命令")
+    active.approval_decision = decision
+    active.approval_event.set()
+    cmd = active.pending_approval.get("command", "")
+    return success_response(
+        msg="已批准命令执行" if decision else "已拒绝命令执行",
+        data={"command": cmd, "approved": decision},
+    )
+
+
 @router.get("/runs/{run_id}/status")
 async def get_run_status(
     run_id: int,

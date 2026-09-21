@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = None
+    template: str | None = Field(default=None, description="项目模板: python|node|web|empty")
     storage_type: str = Field(default="cloud", pattern="^(cloud|local)$")
     # root_path 仅 local 模式由桌面端传入展示名, cloud 模式后端自动生成
     root_hint: str | None = None

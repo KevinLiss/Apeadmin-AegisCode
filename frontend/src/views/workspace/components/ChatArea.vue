@@ -49,7 +49,15 @@
       >
         <!-- 用户消息：深色气泡右对齐 -->
         <template v-if="msg.role === 'user'">
-          <div class="msg-bubble user">{{ msg.content }}</div>
+          <div class="msg-bubble user">
+            <template v-if="Array.isArray(msg.content)">
+              <span v-for="(part, pi) in msg.content" :key="pi">
+                <template v-if="part.type === 'text'">{{ part.text }}</template>
+                <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="msg-image" alt="图片" />
+              </span>
+            </template>
+            <template v-else>{{ msg.content }}</template>
+          </div>
         </template>
 
         <!-- Assistant 消息：白色圆角气泡 -->
@@ -99,12 +107,75 @@
                 <div class="tool-result-header" @click="msg._expanded = !msg._expanded">
                   <span class="result-status">{{ msg.tool_success ? '✓' : '✗' }}</span>
                   <span class="result-name">{{ msg.tool_name }}</span>
+                  <span class="result-diff-badge" v-if="msg._toolDiff && !msg._expanded">+{{ msg._toolDiff.added }} −{{ msg._toolDiff.removed }}</span>
                   <svg class="tool-chevron" :class="{ open: msg._expanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                     <polyline points="9 18 15 12 9 6"/>
                   </svg>
                 </div>
                 <div v-if="msg._expanded" class="tool-result-body">
-                  <pre class="tool-output">{{ formatToolResult(msg.tool_result) }}</pre>
+                  <!-- 写文件 Diff 预览卡片 -->
+                  <div v-if="msg._toolDiff" class="diff-preview">
+                    <div class="diff-stats">
+                      <span class="diff-stat added">+{{ msg._toolDiff.added }} 新增</span>
+                      <span class="diff-stat removed">−{{ msg._toolDiff.removed }} 删除</span>
+                      <span class="diff-action">{{ msg._toolDiff.action === 'created' ? '新建文件' : '修改文件' }}</span>
+                    </div>
+                    <pre class="diff-content"><code v-for="(line, li) in msg._toolDiff.lines" :key="li" :class="diffLineClass(line)">{{ line }}</code></pre>
+                  </div>
+                  <pre v-else class="tool-output">{{ formatToolResult(msg.tool_result) }}</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- 高危命令审批卡片 -->
+        <template v-else-if="msg.role === 'approval'">
+          <div class="msg-content">
+            <div class="ai-bubble">
+              <div class="approval-card" :class="msg.status">
+                <div class="approval-header">
+                  <svg class="approval-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 9v4"/><path d="M12 17h.01"/>
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  </svg>
+                  <span class="approval-title">命令需要您的批准</span>
+                </div>
+                <div class="approval-reason">{{ msg.reason }}</div>
+                <pre class="approval-command">{{ msg.command }}</pre>
+                <div v-if="msg.status === 'pending'" class="approval-actions">
+                  <button class="approve-btn" @click="handleApproval(msg, true)">批准执行</button>
+                  <button class="reject-btn" @click="handleApproval(msg, false)">拒绝</button>
+                </div>
+                <div v-else class="approval-result" :class="msg.status">
+                  {{ msg.status === 'approved' ? '已批准，命令正在执行…' : '已拒绝执行该命令' }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Todo 任务清单卡片 -->
+        <template v-else-if="msg.role === 'todo'">
+          <div class="msg-content">
+            <div class="ai-bubble">
+              <div class="todo-card">
+                <div class="todo-header">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                  </svg>
+                  <span class="todo-title">任务清单</span>
+                  <span class="todo-count">{{ msg.todos.filter((t: any) => t.status === 'completed').length }}/{{ msg.todos.length }}</span>
+                </div>
+                <div class="todo-list">
+                  <div v-for="(t, ti) in msg.todos" :key="t.id + '-' + ti" class="todo-item" :class="t.status">
+                    <span class="todo-check">
+                      <svg v-if="t.status === 'completed'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                      <svg v-else-if="t.status === 'in_progress'" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>
+                    </span>
+                    <span class="todo-content">{{ t.content }}</span>
+                    <span class="todo-status" v-if="t.status !== 'pending'">{{ t.status === 'completed' ? '已完成' : t.status === 'in_progress' ? '进行中' : '已取消' }}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -174,7 +245,8 @@
       <!-- 附件条（已上传待发送的附件） -->
       <div v-if="attachments.length || uploadingAttachment" class="attachment-bar">
         <div v-for="(a, i) in attachments" :key="a.path" class="attachment-chip">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <img v-if="a.isImage && a.dataUrl" :src="a.dataUrl" class="attachment-thumb" alt="" />
+          <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
           </svg>
           <span class="attachment-name" :title="a.path">{{ a.name }}</span>
@@ -418,10 +490,14 @@ interface AttachmentItem {
   name: string
   path: string
   size: number
+  isImage?: boolean
+  dataUrl?: string
 }
 const attachments = ref<AttachmentItem[]>([])
 const uploadingAttachment = ref(false)
 const attachmentInputRef = ref<HTMLInputElement | null>(null)
+
+const IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif)$/i
 
 function pickAttachment() {
   attachmentInputRef.value?.click()
@@ -439,11 +515,17 @@ async function onAttachmentChange(ev: Event) {
   for (const f of files) {
     try {
       const res: any = await workspaceApi.uploadFile(props.project.id, f, '用户上传')
-      attachments.value.push({
+      const item: AttachmentItem = {
         name: res?.name || f.name,
         path: res?.path || `用户上传/${f.name}`,
         size: res?.size || f.size || 0,
-      })
+      }
+      // 图片附件：读取为 dataURL，发送时以多模态 content 注入（供视觉模型理解）
+      if (IMAGE_EXT_RE.test(f.name)) {
+        item.isImage = true
+        item.dataUrl = await fileToDataUrl(f)
+      }
+      attachments.value.push(item)
       ok++
     } catch (e: any) {
       fail++
@@ -454,6 +536,15 @@ async function onAttachmentChange(ev: Event) {
   if (ok && !fail) ElMessage.success(`${ok} 个附件已上传到「用户上传」`)
   else if (ok && fail) ElMessage.warning(`${ok} 个成功，${fail} 个失败`)
   else ElMessage.error('附件上传失败')
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(new Error('图片读取失败'))
+    reader.readAsDataURL(file)
+  })
 }
 
 function removeAttachment(idx: number) {
@@ -592,11 +683,24 @@ async function loadHistory() {
   try {
     const res: any = await agentApi.listMessages(runId.value)
     if (res.messages) {
-      messages.value = res.messages.map((m: any) => ({
-        ...m,
-        _expanded: false,
-        _thinkingOpen: false,
-      }))
+      messages.value = res.messages.map((m: any) => {
+        const msg: any = { ...m, _expanded: false, _thinkingOpen: false }
+        // 历史 tool 消息：解析写文件 diff 预览
+        if (m.role === 'tool' && (m.tool_name === 'aegis_write_file' || m.tool_name === 'write_file')) {
+          try {
+            const parsed = typeof m.tool_result === 'string' ? JSON.parse(m.tool_result) : m.tool_result
+            if (parsed && typeof parsed.diff === 'string') {
+              msg._toolDiff = {
+                action: parsed.action,
+                added: parsed.diff_stats?.added ?? 0,
+                removed: parsed.diff_stats?.removed ?? 0,
+                lines: parsed.diff.split('\n'),
+              }
+            }
+          } catch { /* 忽略非 JSON */ }
+        }
+        return msg
+      })
       await scrollToBottom()
     }
   } catch {
@@ -624,26 +728,64 @@ async function sendMessage(presetText?: string) {
   resetInputHeight()
   emit('streamingChange', true)
 
-  // 附件：上传后以路径提示注入消息，告知 Agent 可读取的参考文件
+  // 附件：图片走多模态 content 注入（视觉模型理解），其余以路径提示文本注入
   const att = attachments.value.slice()
   attachments.value = []
-  let text = raw
+  let finalContent: string | any[] = raw
+  let userDisplay = raw
+
   if (att.length) {
-    const list = att.map((a) => `- ${a.path}`).join('\n')
-    text = raw
-      ? `${raw}\n\n[已上传参考文件，可用 read_file 工具读取]\n${list}`
-      : `请阅读以下已上传的参考文件：\n${list}`
+    const images = att.filter((a) => a.isImage && a.dataUrl)
+    const others = att.filter((a) => !a.isImage || !a.dataUrl)
+
+    if (images.length) {
+      // 多模态 content 数组：文本 + 图片
+      const parts: any[] = []
+      const textPart = raw
+        ? raw
+        : (others.length
+          ? `请查看以下图片并阅读上传的参考文件。`
+          : `请分析这张图片的内容。`)
+      parts.push({ type: 'text', text: textPart })
+      for (const img of images) {
+        parts.push({
+          type: 'image_url',
+          image_url: { url: img.dataUrl },
+        })
+      }
+      // 非图片附件附在文本后提示
+      if (others.length) {
+        const list = others.map((a) => `- ${a.path}`).join('\n')
+        parts[0].text += `\n\n[已上传参考文件，可用 read_file 工具读取]\n${list}`
+      }
+      finalContent = parts
+      userDisplay = raw
+        ? `${raw}  [🖼 ${images.length} 张图片]`
+        : `[图片附件 ${images.length} 张]${others.length ? ` + ${others.length} 个文件` : ''}`
+    } else {
+      // 仅非图片附件：沿用文本路径提示
+      const list = att.map((a) => `- ${a.path}`).join('\n')
+      finalContent = raw
+        ? `${raw}\n\n[已上传参考文件，可用 read_file 工具读取]\n${list}`
+        : `请阅读以下已上传的参考文件：\n${list}`
+      userDisplay = typeof finalContent === 'string' ? finalContent : raw
+    }
   }
 
   // 技能激活时拼接技能 prompt 前缀
-  let finalText = text
   if (activeSkill.value) {
     const sk = activeSkill.value
-    finalText = `【技能：${sk.display_name}】\n${sk.system_prompt || sk.description || ''}\n\n${text}`
+    const prefix = `【技能：${sk.display_name}】\n${sk.system_prompt || sk.description || ''}\n\n`
+    if (typeof finalContent === 'string') {
+      finalContent = prefix + finalContent
+    } else {
+      // 多模态数组：把技能前缀并入首段文本
+      finalContent = [{ type: 'text', text: prefix + (finalContent[0]?.text || '') }, ...finalContent.slice(1)]
+    }
   }
 
-  // 添加用户消息（原始输入，不含技能前缀）
-  messages.value.push({ role: 'user', content: text })
+  // 添加用户消息（显示用：文本摘要 + 图片标记）
+  messages.value.push({ role: 'user', content: userDisplay })
   await scrollToBottom()
 
   // 首次发送：创建 run（带标题）
@@ -677,7 +819,7 @@ async function sendMessage(presetText?: string) {
   let abortedBySwitch = false
 
   try {
-    const response = await agentApi.sendMessage(runId.value!, finalText, true, controller.signal) as Response
+    const response = await agentApi.sendMessage(runId.value!, finalContent, true, controller.signal) as Response
     if (!response.ok) {
       const errText = await response.text()
       throw new Error(`HTTP ${response.status}: ${errText}`)
@@ -825,14 +967,46 @@ async function handleSSEEvent(event: any) {
       break
 
     case 'tool_result':
+      // 写文件工具：尝试解析结果提取 diff 预览
+      let toolDiff: any = null
+      if (event.name === 'aegis_write_file' || event.name === 'write_file') {
+        try {
+          const parsed = typeof event.result === 'string' ? JSON.parse(event.result) : event.result
+          if (parsed && typeof parsed.diff === 'string') {
+            toolDiff = {
+              action: parsed.action,
+              added: parsed.diff_stats?.added ?? 0,
+              removed: parsed.diff_stats?.removed ?? 0,
+              lines: parsed.diff.split('\n'),
+            }
+          }
+        } catch { /* 非 JSON 结果则按普通结果展示 */ }
+      }
       messages.value.push({
         role: 'tool',
         tool_name: event.name,
         tool_result: event.result,
         tool_success: event.success,
         _expanded: false,
+        _toolDiff: toolDiff,
       })
       await scrollToBottom()
+      break
+
+    case 'tool_approval_request':
+      // 高危命令需人工审批：插入审批卡片消息
+      messages.value.push({
+        role: 'approval',
+        command: event.command,
+        reason: event.reason,
+        status: 'pending',
+      })
+      await scrollToBottom()
+      break
+
+    case 'todo_update':
+      // 更新当前 todo 卡片（合并到最新一条 todo 卡片或新建）
+      renderTodoCard(event.todos)
       break
 
     case 'done':
@@ -900,6 +1074,32 @@ async function controlRun(action: 'pause' | 'resume' | 'cancel') {
   }
 }
 
+// ── 高危命令审批 ──
+async function handleApproval(msg: any, decision: boolean) {
+  if (!runId.value) return
+  try {
+    await agentApi.approveCommand(runId.value, decision)
+    msg.status = decision ? 'approved' : 'rejected'
+    await scrollToBottom()
+  } catch (e: any) {
+    ElMessage.error(e.message || '审批操作失败')
+  }
+}
+
+// ── Todo 任务清单卡片 ──
+function renderTodoCard(todos: any[]) {
+  if (!todos || !todos.length) return
+  // 找到最近的 todo 卡片消息（可能已存在），否则新建一条
+  let last = [...messages.value].reverse().find((m) => m.role === 'todo')
+  if (!last) {
+    last = { role: 'todo' }
+    messages.value.push(last)
+  }
+  last.todos = todos
+  last._touched = Date.now()
+  scrollToBottom()
+}
+
 // ── 渲染辅助 ──
 function renderContent(text: string): string {
   // 简单的 markdown 渲染：代码块、行内代码、粗体
@@ -926,6 +1126,14 @@ function formatJson(str: string): string {
 function formatToolResult(result: any): string {
   if (typeof result === 'string') return result
   return JSON.stringify(result, null, 2)
+}
+
+// diff 行样式：+ 新增行 / - 删除行 / @@ 区块头 / 其余默认
+function diffLineClass(line: string): string {
+  if (line.startsWith('+')) return 'diff-add'
+  if (line.startsWith('-')) return 'diff-del'
+  if (line.startsWith('@@')) return 'diff-hunk'
+  return 'diff-ctx'
 }
 
 // ── UI 辅助 ──
@@ -1257,6 +1465,221 @@ function onShiftEnter() {
   word-break: break-word;
 }
 
+/* ── 写文件 Diff 预览卡片 ── */
+.result-diff-badge {
+  font-size: 11px;
+  font-weight: 600;
+  background: #ecfdf5;
+  color: #059669;
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+.diff-preview {
+  border: 1px solid var(--theme-border-color, #e5e7eb);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--theme-card-bg, #fff);
+}
+.diff-stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: var(--theme-hover-bg, #f6f7f9);
+  border-bottom: 1px solid var(--theme-border-color, #e5e7eb);
+}
+.diff-stat.added { color: #059669; font-weight: 600; }
+.diff-stat.removed { color: #dc2626; font-weight: 600; }
+.diff-action {
+  margin-left: auto;
+  color: var(--theme-text-secondary, #6b7280);
+  font-weight: 500;
+}
+.diff-content {
+  margin: 0;
+  padding: 8px 0;
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.55;
+  font-family: 'Menlo', 'Monaco', monospace;
+  white-space: pre;
+  overflow-x: auto;
+}
+.diff-content code {
+  display: block;
+  padding: 0 10px;
+  font-family: inherit;
+}
+.diff-content code.diff-add {
+  background: #ecfdf5;
+  color: #047857;
+}
+.diff-content code.diff-del {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.diff-content code.diff-hunk {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+.diff-content code.diff-ctx {
+  color: var(--theme-text-color, #374151);
+}
+
+/* ── 高危命令审批卡片 ── */
+.approval-card {
+  border: 1px solid #fcd34d;
+  background: #fffbeb;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.approval-card.approved {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+}
+.approval-card.rejected {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.approval-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #92400e;
+  font-size: 13px;
+}
+.approval-card.approved .approval-header { color: #065f46; }
+.approval-card.rejected .approval-header { color: #991b1b; }
+.approval-icon { flex-shrink: 0; }
+.approval-reason {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #92400e;
+}
+.approval-card.approved .approval-reason { color: #065f46; }
+.approval-card.rejected .approval-reason { color: #991b1b; }
+.approval-command {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  font-family: 'Menlo', 'Monaco', monospace;
+  font-size: 12px;
+  color: #78350f;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.approval-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+.approve-btn {
+  background: #16a34a;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.approve-btn:hover { background: #15803d; }
+.reject-btn {
+  background: #fff;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  padding: 7px 16px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.reject-btn:hover { background: #fef2f2; }
+.approval-result {
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.approval-result.approved { color: #059669; }
+.approval-result.rejected { color: #dc2626; }
+
+/* ── Todo 任务清单卡片 ── */
+.todo-card {
+  border: 1px solid var(--theme-border-color, #e5e7eb);
+  background: var(--theme-card-bg, #fff);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.todo-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--theme-text-color, #374151);
+  margin-bottom: 6px;
+}
+.todo-header svg { color: var(--el-color-primary, #4f46e5); }
+.todo-count {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-color-primary, #4f46e5);
+  background: var(--theme-hover-bg, #f6f7f9);
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+.todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 3px 0;
+  color: var(--theme-text-color, #374151);
+}
+.todo-item.completed .todo-content {
+  text-decoration: line-through;
+  color: var(--theme-text-secondary, #9ca3af);
+}
+.todo-check {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid #d1d5db;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #fff;
+}
+.todo-item.completed .todo-check {
+  background: #16a34a;
+  border-color: #16a34a;
+}
+.todo-item.in_progress .todo-check {
+  border-color: var(--el-color-primary, #4f46e5);
+  color: var(--el-color-primary, #4f46e5);
+  border-width: 1px;
+}
+.todo-content { flex: 1; word-break: break-all; }
+.todo-status {
+  font-size: 10px;
+  color: var(--theme-text-secondary, #9ca3af);
+  flex-shrink: 0;
+}
+.todo-item.completed .todo-status { color: #059669; }
+.todo-item.in_progress .todo-status { color: var(--el-color-primary, #4f46e5); }
+
 /* ── 流式指示器 ── */
 .streaming-indicator {
   display: flex;
@@ -1413,6 +1836,21 @@ function onShiftEnter() {
 .attachment-chip > svg {
   flex-shrink: 0;
   color: var(--el-color-primary, #4f46e5);
+}
+.attachment-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid var(--theme-border-color, #e5e7eb);
+}
+.msg-image {
+  max-width: 260px;
+  max-height: 220px;
+  border-radius: 8px;
+  display: block;
+  margin-top: 6px;
 }
 .attachment-chip.uploading {
   color: var(--theme-text-secondary, #9ca3af);

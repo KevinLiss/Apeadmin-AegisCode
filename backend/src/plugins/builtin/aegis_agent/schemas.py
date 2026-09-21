@@ -55,8 +55,14 @@ class RunCreate(BaseModel):
 
 
 class RunMessage(BaseModel):
-    """向 Agent 发送消息。"""
-    content: str = Field(..., min_length=1, max_length=50000, description="用户消息")
+    """向 Agent 发送消息。
+
+    content 支持两种形式:
+    - str: 纯文本消息
+    - list: OpenAI 多模态 content 数组，如
+      [{"type": "text", "text": "描述"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}]
+    """
+    content: str | list = Field(..., description="用户消息（文本或多模态数组）")
     stream: bool = Field(default=True, description="是否流式返回")
 
 

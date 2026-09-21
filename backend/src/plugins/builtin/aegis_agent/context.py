@@ -31,7 +31,7 @@ from loguru import logger
 class ContextMessage:
     """上下文中的单条消息。"""
     role: str          # system / user / assistant / tool
-    content: str = ""
+    content: str | list = ""  # str 或 OpenAI 多模态 content 数组
     tool_calls: list[dict] | None = None
     tool_call_id: str | None = None
     name: str | None = None
@@ -138,7 +138,7 @@ class LayeredContext:
             message.tokens_estimated = self._estimate_tokens(message)
         self._all_messages.append(message)
 
-    def add_user_message(self, content: str) -> None:
+    def add_user_message(self, content: str | list) -> None:
         self.add_message(ContextMessage(role="user", content=content))
 
     def add_assistant_message(
@@ -233,12 +233,13 @@ class LayeredContext:
             # 简单摘要：拼接关键信息
             summary_parts: list[str] = []
             for msg in to_compress:
+                text = msg.content if isinstance(msg.content, str) else "[图片/多模态消息]"
                 if msg.role == "user":
-                    summary_parts.append(f"用户: {msg.content[:200]}")
+                    summary_parts.append(f"用户: {text[:200]}")
                 elif msg.role == "assistant":
-                    summary_parts.append(f"助手: {msg.content[:200]}")
+                    summary_parts.append(f"助手: {text[:200]}")
                 elif msg.role == "tool":
-                    summary_parts.append(f"工具结果: {msg.content[:100]}")
+                    summary_parts.append(f"工具结果: {text[:100]}")
 
             new_summary = "\n".join(summary_parts)
             if self._summary:
@@ -295,7 +296,20 @@ class LayeredContext:
 
         仅用于判断是否需要触发压缩，预算控制一律以 API usage 为准。
         """
-        text = message.content or ""
+        content = message.content
+        if isinstance(content, list):
+            # 多模态 content: 文本部分参与估算，图片按固定 token 粗估
+            text = ""
+            for part in content:
+                if isinstance(part, dict):
+                    if part.get("type") == "text":
+                        text += part.get("text", "")
+                    elif part.get("type") == "image_url":
+                        text += " [image: 1000tokens]"
+                elif isinstance(part, str):
+                    text += part
+        else:
+            text = content or ""
         if message.tool_calls:
             text += json.dumps(message.tool_calls, ensure_ascii=False)
         # 粗估: 中文约 1.5 字/token, 英文约 4 字符/token，混合取 ~3
